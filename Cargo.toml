@@ -1,0 +1,44 @@
+[package]
+name = "ttgo-camera"
+version = "0.1.0"
+authors = ["George C. Huntington III <ghuntington@hubbell.com>"]
+edition = "2021"
+resolver = "2"
+rust-version = "1.71"
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true    # Symbols are nice and they don't increase the size on Flash
+opt-level = "z"
+
+[features]
+default = ["std", "embassy", "esp-idf-svc/native"]
+
+pio = ["esp-idf-svc/pio"]
+std = ["alloc", "esp-idf-svc/binstart", "esp-idf-svc/std"]
+alloc = ["esp-idf-svc/alloc"]
+nightly = ["esp-idf-svc/nightly"]
+experimental = ["esp-idf-svc/experimental"]
+embassy = ["esp-idf-svc/embassy-sync", "esp-idf-svc/critical-section", "esp-idf-svc/embassy-time-driver"]
+
+[dependencies]
+log = { version = "0.4", default-features = false }
+esp-idf-svc = { version = "0.47.3", default-features = false }
+esp-idf-hal = "0.42.5"
+ssd1306 = "0.8.4"
+esp-idf-sys = "0.33.7"
+
+[build-dependencies]
+embuild = "0.31.3"
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp32-camera"}
+# component_dirs = "esp32-camera"
+bindings_header = "bindings.h"
+bindings_module = "camera"
+git = "https://github.com/espressif/esp32-camera.git"
+
+# [[package.metadata.esp-idf-sys.extra_components]]
+# remote_component = { name = "espressif/esp32-camera"}
