@@ -1,21 +1,17 @@
-pub mod lib;
+// pub mod lib;
+
+// use esp_idf_sys::camera::camera_config_t;
 
 use esp_idf_hal::{
-    delay::{Ets, FreeRtos},
-    gpio::*,
-    i2c::*,
     peripherals::Peripherals,
-    prelude::*,
+    prelude::*, gpio,
 };
+// delay::{Ets, FreeRtos},
+// gpio::{*, self},
+// i2c::*,
 
+use ttgo_camera::Camera;
 
-// PIR sensor on GPIO 33
-// const PIR_DETECT
-
-// SDA on GPIO 21
-// SCL on GPIO 22
-
-// Button on GPIO 34
 
 // Chip: ESP32-WROVER-B
 // Protocol: Wi-Fi 802.11 b/g/n & bluetooth 4.2 BLE & BR/EDR
@@ -30,6 +26,7 @@ use esp_idf_hal::{
 // Camera: OV2640
 // Camera Resolution: 2 Megapixel
 
+// this is from https://makeradvisor.com/esp32-ttgo-t-camera-pir-sensor-oled/
 // define PWDN_GPIO_NUM -1
 // define RESET_GPIO_NUM -1
 // define XCLK_GPIO_NUM 32
@@ -46,62 +43,81 @@ use esp_idf_hal::{
 // define VSYNC_GPIO_NUM 27
 // define HREF_GPIO_NUM 25
 // define PCLK_GPIO_NUM 19
-
-// OV2640 Camera	ESP32
-// Y9	GPIO 39
-// Y8	GPIO 36
-// Y7	GPIO 23
-// Y6	GPIO 18
-// Y5	GPIO 15
-// Y4	GPIO 4
-// Y3	GPIO 14
-// Y2	GPIO 5
-// VSYNC	GPIO 27
-// HREF	GPIO 25
-// PCLK	GPIO 19
-// PWD	GPIO 26
-// XCLK	GPIO 32
-// SIOD	GPIO 13
-// SIOC	GPIO 12
-// RST	not connected (-1)
-
 fn main() {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
 
-    // let camera_config = esp_idf_sys::camera_config_t{
-    //     pin_pwdn : -1,
-    //     pin_reset : -1,
-    //     pin_xclk : 32,
-    //     pin_sscb_sda : 13,
-    //     pin_sscb_scl : 12,
+    let peripherals = Peripherals::take().unwrap();
+    // OV2640 Camera	ESP32
+    // PWD	GPIO 26
+    let pin_pwdn = peripherals.pins.gpio26;
+    // RST	not connected (-1)
+    let pin_reset = -1;
+    // XCLK	GPIO 32
+    let pin_xclk = peripherals.pins.gpio32;
+    // Y2	GPIO 5
+    let pin_d0 = peripherals.pins.gpio5;
+    // Y3	GPIO 14
+    let pin_d1 = peripherals.pins.gpio14;
+    // Y4	GPIO 4
+    let pin_d2 = peripherals.pins.gpio4;
+    // Y5	GPIO 15
+    let pin_d3 = peripherals.pins.gpio15;
+    // Y6	GPIO 18
+    let pin_d4 = peripherals.pins.gpio18;
+    // Y7	GPIO 23
+    let pin_d5 = peripherals.pins.gpio23;
+    // Y8	GPIO 36
+    let pin_d6 = peripherals.pins.gpio36;
+    // Y9	GPIO 39
+    let pin_d7 = peripherals.pins.gpio39;
+    // VSYNC	GPIO 27
+    let pin_vsync = peripherals.pins.gpio27;
+    // HREF	GPIO 25
+    let pin_href = peripherals.pins.gpio25;
+    // PCLK	GPIO 19
+    let pin_pclk = peripherals.pins.gpio19;
+    // SIOD	GPIO 13
 
-    //     pin_d7 : 39,
-    //     pin_d6 : 36,
-    //     pin_d5 : 23,
-    //     pin_d4 : 18,
-    //     pin_d3 : 15,
-    //     pin_d2 : 4,
-    //     pin_d1 : 14,
-    //     pin_d0 : 5,
-    //     pin_vsync : 27,
-    //     pin_href : 25,
-    //     pin_pclk : 19,
+    // SIOC	GPIO 12
 
-    //     //XCLK 20MHz or 10MHz for OV2640 double FPS (Experimental)
-    //     xclk_freq_hz : 20000000,
-    //     ledc_timer : esp_idf_sys::ledc_timer_t_LEDC_TIMER_0,
-    //     ledc_channel : esp_idf_sys::ledc_channel_t_LEDC_CHANNEL_0,
 
-    //     pixel_format : esp_idf_sys::pixformat_t_PIXFORMAT_JPEG, //YUV422,GRAYSCALE,RGB565,JPEG
-    //     frame_size : esp_idf_sys::framesize_t_FRAMESIZE_QVGA ,    //QQVGA-UXGA Do not use sizes above QVGA when not JPEG
+    let cam = Camera::new(
+        pin_pwdn, pin_reset.into(), pin_xclk,
+        pin_d0, pin_d1, pin_d2, pin_d3, pin_d4, pin_d5, pin_d6, pin_d7,
+        pin_vsync, pin_href, pin_pclk).unwrap();
 
-    //     jpeg_quality : 12, //0-63 lower number means higher quality
-    //     fb_count : 1,       //if more than one, i2s runs in continuous mode. Use only with JPEG
-    //     fb_location: esp_idf_sys::camera_fb_location_t_CAMERA_FB_IN_PSRAM,
-    //     grab_mode: esp_idf_sys::camera_grab_mode_t_CAMERA_GRAB_WHEN_EMPTY
-    // };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();

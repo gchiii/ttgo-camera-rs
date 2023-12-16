@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_sys::*;
-// use esp_idf_sys
+
 pub struct FrameBuffer<'a> {
     fb: *mut camera::camera_fb_t,
     _p: PhantomData<&'a camera::camera_fb_t>,
