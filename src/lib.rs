@@ -213,8 +213,8 @@ pub struct Camera<'a> {
 
 impl<'a> Camera<'a> {
     pub fn new(
-        pin_pwdn: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_reset: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
+        pin_pwdn: impl Peripheral<P = impl OutputPin> + 'a,
+        pin_reset: impl Peripheral<P = impl OutputPin> + 'a,
         pin_xclk: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
         pin_d0: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
         pin_d1: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
@@ -222,8 +222,8 @@ impl<'a> Camera<'a> {
         pin_d3: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
         pin_d4: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
         pin_d5: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_d6: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_d7: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
+        pin_d6: impl Peripheral<P = impl InputPin> + 'a,
+        pin_d7: impl Peripheral<P = impl InputPin> + 'a,
         pin_vsync: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
         pin_href: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
         pin_pclk: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
