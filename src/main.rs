@@ -1,16 +1,15 @@
 use std::io::Cursor;
-use std::thread;
-use std::{sync::Arc, time::Duration};
 
 use esp_idf_hal::delay::FreeRtos;
+use esp_idf_hal::i2c::{I2cConfig, I2cDriver};
 use esp_idf_sys::EspError;
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
-use image::{DynamicImage, GenericImageView};
+use image::{DynamicImage, GenericImageView, ImageError};
 
 use esp_idf_hal::{
     peripherals::Peripherals,
-    prelude::*, gpio::{self, InputPin, OutputPin}, peripheral::Peripheral,
+    prelude::*,
 };
 // delay::{Ets, FreeRtos},
 // gpio::{*, self},
@@ -90,31 +89,30 @@ fn init_camera() -> Result<(), EspError> {
     esp_idf_sys::esp!(unsafe { camera::esp_camera_init(&config) })
 }
 
-fn take_picture() {
+
+
+fn alt_take_pic() -> Result<DynamicImage, ImageError>{
+    let fb = unsafe { camera::esp_camera_fb_get() };
+
+    let mut buf: *mut u8 = unsafe { libc::malloc(std::mem::size_of::<u8>()) as *mut u8 };
+    let mut buf_len = 0;
+
+    unsafe { camera::frame2bmp(fb, &mut buf, &mut buf_len) } ;
+
+    let photo = unsafe { std::slice::from_raw_parts_mut(buf, buf_len) };
+
+    // let photo = unsafe { std::slice::from_raw_parts((*fb).buf, (*fb).len) };
+
+    println!("Read");
+    let img = ImageReader::new(Cursor::new(photo))
+        .with_guessed_format()?
+        .decode()?;
     unsafe {
-        let pic = camera::esp_camera_fb_get();
-        let mut buf: *mut u8 = libc::malloc(std::mem::size_of::<u8>()) as *mut u8;
-        let mut buf_len = 0;
-
-        camera::frame2bmp(pic, &mut buf, &mut buf_len);
-
-        let slice = std::slice::from_raw_parts_mut(buf, buf_len);
-
-        // println!("Read");
-        let img = ImageReader::new(Cursor::new(slice))
-            .with_guessed_format()
-            .unwrap();
-
-        // println!("Decode");
-        match img.decode() {
-            Ok(img) => image_to_ascii(img),
-            Err(err) => {
-                dbg!(err);
-            }
-        };
         libc::free(buf as *mut libc::c_void);
-        camera::esp_camera_fb_return(pic);
+        camera::esp_camera_fb_return(fb);
     }
+
+    Ok(img)
 }
 
 fn image_to_ascii(image: DynamicImage) {
@@ -144,41 +142,101 @@ fn image_to_ascii(image: DynamicImage) {
     }
 }
 
+use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+use embedded_graphics::{
+    Drawable,
+    draw_target::DrawTarget,
+    mono_font::{ascii::FONT_6X12, MonoTextStyleBuilder},
+    pixelcolor::BinaryColor,
+    prelude::*,
+    text::{Baseline, Text},
+    primitives::{Circle, PrimitiveStyleBuilder, Rectangle, Triangle},
+};
+
+
+fn draw_shapes<D: DrawTarget<Color = BinaryColor>>(display: &mut D) where <D as DrawTarget>::Error: std::fmt::Debug
+{
+    let yoffset = 8;
+
+    let style = PrimitiveStyleBuilder::new()
+        .stroke_width(1)
+        .stroke_color(BinaryColor::On)
+        .build();
+
+    // screen outline
+    // default display size is 128x64 if you don't pass a _DisplaySize_
+    // enum to the _Builder_ struct
+    Rectangle::new(Point::new(0, 0), Size::new(127, 31))
+        .into_styled(style)
+        .draw(display)
+        .unwrap();
+
+    // triangle
+    Triangle::new(
+        Point::new(16, 16 + yoffset),
+        Point::new(16 + 16, 16 + yoffset),
+        Point::new(16 + 8, yoffset),
+    )
+    .into_styled(style)
+    .draw(display)
+    .unwrap();
+
+    // square
+    Rectangle::new(Point::new(52, yoffset), Size::new_equal(16))
+        .into_styled(style)
+        .draw(display)
+        .unwrap();
+
+    // circle
+    Circle::new(Point::new(88, yoffset), 16)
+        .into_styled(style)
+        .draw(display)
+        .unwrap();
+
+}
+
+fn draw_some_text<D: DrawTarget<Color = BinaryColor>>(display: &mut D) where <D as DrawTarget>::Error: std::fmt::Debug
+{
+    let text_style = MonoTextStyleBuilder::new()
+        .font(&FONT_6X12)
+        .text_color(BinaryColor::On)
+        .build();
+
+    Text::with_baseline("Hello world!", Point::zero(), text_style, Baseline::Top)
+        .draw(display)
+        .unwrap();
+
+    Text::with_baseline("Hello Rust!", Point::new(0, 16), text_style, Baseline::Top)
+        .draw(display)
+        .unwrap();
+}
+
 fn main() {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
 
     let peripherals = Peripherals::take().unwrap();
-    // // OV2640 Camera	ESP32
-    // // PWD	GPIO 26
-    // let pin_pwdn = peripherals.pins.gpio26;
-    // // RST	not connected (-1)
-    // let pin_reset = -1;
-    // // XCLK	GPIO 32
-    // let pin_xclk = peripherals.pins.gpio32;
-    // // Y2	GPIO 5
-    // let pin_d0 = peripherals.pins.gpio5;
-    // // Y3	GPIO 14
-    // let pin_d1 = peripherals.pins.gpio14;
-    // // Y4	GPIO 4
-    // let pin_d2 = peripherals.pins.gpio4;
-    // // Y5	GPIO 15
-    // let pin_d3 = peripherals.pins.gpio15;
-    // // Y6	GPIO 18
-    // let pin_d4 = peripherals.pins.gpio18;
-    // // Y7	GPIO 23
-    // let pin_d5 = peripherals.pins.gpio23;
-    // // Y8	GPIO 36
-    // let pin_d6 = peripherals.pins.gpio36;
-    // // Y9	GPIO 39
-    // let pin_d7 = peripherals.pins.gpio39;
-    // // VSYNC	GPIO 27
-    // let pin_vsync = peripherals.pins.gpio27;
-    // // HREF	GPIO 25
-    // let pin_href = peripherals.pins.gpio25;
-    // // PCLK	GPIO 19
-    // let pin_pclk = peripherals.pins.gpio19;
+    let i2c = peripherals.i2c0;
+    let sda = peripherals.pins.gpio21;
+    let scl = peripherals.pins.gpio22;
+
+    let config = I2cConfig::new().baudrate(400.kHz().into());
+    let i2c = I2cDriver::new(i2c, sda, scl, &config).unwrap();
+    let interface = I2CDisplayInterface::new(i2c);
+    // Command::AllOn(true).send(&mut interface).unwrap();
+    // FreeRtos::delay_ms(2000);
+    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate180)
+        .into_buffered_graphics_mode();
+    display.init().unwrap();
+
+
+    draw_shapes(&mut display);
+    display.flush().unwrap();
+    FreeRtos::delay_ms(2000);
+
+    // draw_some_text(&mut display);
+    // display.flush().unwrap();
 
 
     // Bind the log crate to the ESP Logging facilities
@@ -188,10 +246,11 @@ fn main() {
     if init_camera().is_ok() {
         // Reset terminal
         print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
-        loop {
+        while let Ok(pic) = alt_take_pic() {
             // Move to the top left
             print!("{esc}[1;1H", esc = 27 as char);
-            take_picture();
+            // pic.
+            image_to_ascii(pic);
             FreeRtos::delay_ms(2000);
         }
     } else {
