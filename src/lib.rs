@@ -271,8 +271,8 @@ impl<'a> Camera<'a> {
         };
 
         let config = camera::camera_config_t {
-            pin_pwdn: pin_pwdn,
-            pin_reset: pin_reset,
+            pin_pwdn,
+            pin_reset,
             pin_xclk: pin_xclk.pin(),
 
             pin_d0: pin_d0.pin(),
@@ -319,14 +319,14 @@ impl<'a> Camera<'a> {
 
     pub fn get_framebuffer(&self) -> Option<FrameBuffer> {
         let fb = unsafe { camera::esp_camera_fb_get() };
-        return if fb.is_null() {
+        if fb.is_null() {
             None
         } else {
             Some(FrameBuffer {
                 fb,
                 _p: PhantomData,
             })
-        };
+        }
     }
 
     pub fn sensor(&self) -> CameraSensor<'a> {
