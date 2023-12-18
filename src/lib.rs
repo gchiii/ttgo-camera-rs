@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-use esp_idf_hal::gpio::*;
 use esp_idf_hal::peripheral::Peripheral;
+use esp_idf_hal::{gpio::*, peripheral::PeripheralRef};
 use esp_idf_sys::*;
 
 pub struct FrameBuffer<'a> {
@@ -12,6 +12,29 @@ pub struct FrameBuffer<'a> {
 impl<'a> FrameBuffer<'a> {
     pub fn data(&self) -> &'a [u8] {
         unsafe { std::slice::from_raw_parts((*self.fb).buf, (*self.fb).len) }
+    }
+
+    pub unsafe fn data_raw(&mut self) -> *mut camera::camera_fb_t {
+        self.fb
+    }
+
+    pub fn data_as_jpeg(&self, quality: u8) -> Result<&'a [u8], EspError> {
+        if self.format() != camera::pixformat_t_PIXFORMAT_JPEG {
+            let mut buffer: *mut u8 = std::ptr::null_mut();
+            let mut buffer_len: usize = 0;
+
+            let converted =
+                unsafe { camera::frame2jpg(self.fb, quality, &mut buffer, &mut buffer_len) };
+            if !converted {
+                return Err(
+                    EspError::from(camera::ESP_ERR_CAMERA_FAILED_TO_SET_OUT_FORMAT).unwrap(),
+                );
+            }
+
+            Ok(unsafe { std::slice::from_raw_parts(buffer, buffer_len) })
+        } else {
+            Ok(self.data())
+        }
     }
 
     pub fn width(&self) -> usize {
@@ -213,28 +236,43 @@ pub struct Camera<'a> {
 
 impl<'a> Camera<'a> {
     pub fn new(
-        pin_pwdn: impl Peripheral<P = impl OutputPin> + 'a,
-        pin_reset: impl Peripheral<P = impl OutputPin> + 'a,
-        pin_xclk: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_d0: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_d1: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_d2: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_d3: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_d4: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_d5: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
+        pin_pwdn: Option<PeripheralRef<'a, AnyOutputPin>>,
+        pin_reset: Option<PeripheralRef<'a, AnyOutputPin>>,
+        pin_xclk: impl Peripheral<P = impl OutputPin> + 'a,
+        pin_d0: impl Peripheral<P = impl InputPin> + 'a,
+        pin_d1: impl Peripheral<P = impl InputPin> + 'a,
+        pin_d2: impl Peripheral<P = impl InputPin> + 'a,
+        pin_d3: impl Peripheral<P = impl InputPin> + 'a,
+        pin_d4: impl Peripheral<P = impl InputPin> + 'a,
+        pin_d5: impl Peripheral<P = impl InputPin> + 'a,
         pin_d6: impl Peripheral<P = impl InputPin> + 'a,
         pin_d7: impl Peripheral<P = impl InputPin> + 'a,
-        pin_vsync: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_href: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
-        pin_pclk: impl Peripheral<P = impl InputPin + OutputPin> + 'a,
+        pin_vsync: impl Peripheral<P = impl InputPin> + 'a,
+        pin_href: impl Peripheral<P = impl InputPin> + 'a,
+        pin_pclk: impl Peripheral<P = impl InputPin> + 'a,
+        pin_sccb_sda: Option<PeripheralRef<'a, AnyIOPin>>,
+        pin_sccb_scl: Option<PeripheralRef<'a, AnyIOPin>>,
     ) -> Result<Self, esp_idf_sys::EspError> {
         esp_idf_hal::into_ref!(
-            pin_pwdn, pin_reset, pin_xclk, pin_d0, pin_d1, pin_d2, pin_d3, pin_d4, pin_d5, pin_d6,
-            pin_d7, pin_vsync, pin_href, pin_pclk
+            pin_xclk, pin_d0, pin_d1, pin_d2, pin_d3, pin_d4, pin_d5, pin_d6, pin_d7,
+            pin_vsync, pin_href, pin_pclk
         );
+
+        let pin_pwdn = if let Some(pwdn) = pin_pwdn {
+            pwdn.into_ref().pin()
+        } else {
+            -1
+        };
+
+        let pin_reset = if let Some(reset) = pin_reset {
+            reset.into_ref().pin()
+        } else {
+            -1
+        };
+
         let config = camera::camera_config_t {
-            pin_pwdn: pin_pwdn.pin(),
-            pin_reset: pin_reset.pin(),
+            pin_pwdn: pin_pwdn,
+            pin_reset: pin_reset,
             pin_xclk: pin_xclk.pin(),
 
             pin_d0: pin_d0.pin(),
@@ -248,6 +286,18 @@ impl<'a> Camera<'a> {
             pin_vsync: pin_vsync.pin(),
             pin_href: pin_href.pin(),
             pin_pclk: pin_pclk.pin(),
+
+            __bindgen_anon_1: pin_sccb_sda
+                .map(|pin| camera::camera_config_t__bindgen_ty_1 {
+                    pin_sccb_sda: pin.into_ref().pin(),
+                })
+                .unwrap_or_default(),
+
+            __bindgen_anon_2: pin_sccb_scl
+                .map(|pin| camera::camera_config_t__bindgen_ty_2 {
+                    pin_sccb_scl: pin.into_ref().pin(),
+                })
+                .unwrap_or_default(),
 
             xclk_freq_hz: 20000000,
             ledc_timer: esp_idf_sys::ledc_timer_t_LEDC_TIMER_0,
