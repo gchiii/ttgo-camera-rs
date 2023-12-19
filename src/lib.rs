@@ -37,6 +37,21 @@ impl<'a> FrameBuffer<'a> {
         }
     }
 
+    pub fn data_as_bmp(&self) -> Result<&'a [u8], EspError> {
+        let mut buffer: *mut u8 = std::ptr::null_mut();
+        let mut buffer_len: usize = 0;
+
+        let converted =
+            unsafe { camera::frame2bmp(self.fb, &mut buffer, &mut buffer_len) };
+        if !converted {
+            return Err(
+                EspError::from(camera::ESP_ERR_CAMERA_FAILED_TO_SET_OUT_FORMAT).unwrap(),
+            );
+        }
+
+        Ok(unsafe { std::slice::from_raw_parts(buffer, buffer_len) })
+    }
+
     pub fn width(&self) -> usize {
         unsafe { (*self.fb).width }
     }
@@ -54,6 +69,11 @@ impl<'a> FrameBuffer<'a> {
     }
 }
 
+impl<'a> Drop for FrameBuffer<'a> {
+    fn drop(&mut self) {
+        unsafe { camera::esp_camera_fb_return(self.fb)};
+    }
+}
 pub struct CameraSensor<'a> {
     sensor: *mut camera::sensor_t,
     _p: PhantomData<&'a camera::sensor_t>,
@@ -303,7 +323,7 @@ impl<'a> Camera<'a> {
             ledc_timer: esp_idf_sys::ledc_timer_t_LEDC_TIMER_0,
             ledc_channel: esp_idf_sys::ledc_channel_t_LEDC_CHANNEL_0,
 
-            pixel_format: camera::pixformat_t_PIXFORMAT_RGB565,
+            pixel_format: camera::pixformat_t_PIXFORMAT_JPEG,
             frame_size: camera::framesize_t_FRAMESIZE_QVGA,
 
             jpeg_quality: 12,
@@ -318,7 +338,7 @@ impl<'a> Camera<'a> {
     }
 
     pub fn get_framebuffer(&self) -> Option<FrameBuffer> {
-        let fb = unsafe { camera::esp_camera_fb_get() };
+        let fb: *mut camera::camera_fb_t = unsafe { camera::esp_camera_fb_get() };
         if fb.is_null() {
             None
         } else {

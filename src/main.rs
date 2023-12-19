@@ -2,6 +2,7 @@ use std::io::Cursor;
 
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver};
+use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_sys::EspError;
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
@@ -11,9 +12,6 @@ use esp_idf_hal::{
     peripherals::Peripherals,
     prelude::*,
 };
-// delay::{Ets, FreeRtos},
-// gpio::{*, self},
-// i2c::*,
 
 use esp_idf_sys::camera::{self, camera_config_t__bindgen_ty_1, camera_config_t__bindgen_ty_2};
 
@@ -48,6 +46,8 @@ const CAM_PIN_D0: ::std::os::raw::c_int = 34;   // define Y2_GPIO_NUM 5
 const CAM_PIN_VSYNC: ::std::os::raw::c_int = 5;   // define VSYNC_GPIO_NUM 27
 const CAM_PIN_HREF: ::std::os::raw::c_int = 27;   // define HREF_GPIO_NUM 25
 const CAM_PIN_PCLK: ::std::os::raw::c_int = 25;   // define PCLK_GPIO_NUM 19
+
+
 
 fn init_camera() -> Result<(), EspError> {
 
@@ -152,6 +152,7 @@ use embedded_graphics::{
     text::{Baseline, Text},
     primitives::{Circle, PrimitiveStyleBuilder, Rectangle, Triangle},
 };
+use ttgo_camera::Camera;
 
 
 fn draw_shapes<D: DrawTarget<Color = BinaryColor>>(display: &mut D) where <D as DrawTarget>::Error: std::fmt::Debug
@@ -216,7 +217,7 @@ fn main() {
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
 
-    let peripherals = Peripherals::take().unwrap();
+    let mut peripherals = Peripherals::take().unwrap();
     let i2c = peripherals.i2c0;
     let sda = peripherals.pins.gpio21;
     let scl = peripherals.pins.gpio22;
@@ -230,7 +231,6 @@ fn main() {
         .into_buffered_graphics_mode();
     display.init().unwrap();
 
-
     draw_shapes(&mut display);
     display.flush().unwrap();
     FreeRtos::delay_ms(2000);
@@ -238,28 +238,88 @@ fn main() {
     // draw_some_text(&mut display);
     // display.flush().unwrap();
 
-
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
     log::info!("Hello, world!");
 
-    if init_camera().is_ok() {
-        // Reset terminal
-        print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
-        while let Ok(pic) = alt_take_pic() {
+    let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
+    let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
+    let cam_pwdn = (&mut peripherals.pins.gpio26).into_ref().map_into();
+    let p_camera = Camera::new(
+        Some(cam_pwdn),
+        None,
+        &mut peripherals.pins.gpio4,
+        &mut peripherals.pins.gpio34,
+        &mut peripherals.pins.gpio13,
+        &mut peripherals.pins.gpio14,
+        &mut peripherals.pins.gpio35,
+        &mut peripherals.pins.gpio39,
+        &mut peripherals.pins.gpio12,
+        &mut peripherals.pins.gpio15,
+        &mut peripherals.pins.gpio36,
+        &mut peripherals.pins.gpio5,
+        &mut peripherals.pins.gpio27,
+        &mut peripherals.pins.gpio25,
+        Some(cam_sda),
+        Some(cam_scl),
+    );
+    let camera = match p_camera {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("{}", e);
+            return;
+        },
+    };
+    let _sensor = camera.sensor();
+    // if let Err(e) = _sensor.set_pixformat(camera::pixformat_t_PIXFORMAT_JPEG) {
+    //     log::error!("{}", e);
+    // }
+    if let Err(e) = _sensor.init_status() {
+        log::error!("{}", e);
+    }
+    // if let Err(e) = _sensor. {
+    //     log::error!("{}", e);
+    // }
+    loop {
+        println!("Read");
+        if let Ok(pic) = alt_take_pic() {
             // Move to the top left
             print!("{esc}[1;1H", esc = 27 as char);
             // pic.
             image_to_ascii(pic);
-            FreeRtos::delay_ms(2000);
         }
-    } else {
-        loop {
-            FreeRtos::delay_ms(2000);
-            log::info!("Hello, world!");
-        }
-
+        // if let Some(fb) = camera.get_framebuffer() {
+        //     match fb.data_as_jpeg(20) {
+        //         Ok(pic) => {
+        //             if let Ok(img_reader) = ImageReader::new(Cursor::new(pic)).with_guessed_format() {
+        //                 match img_reader.decode() {
+        //                     Ok(image) => image_to_ascii(image),
+        //                     Err(e) => log::error!("{}", e),
+        //                 }
+        //             }
+        //         }
+        //         Err(e)=> log::error!("{}", e),
+        //     }
+        // }
+        FreeRtos::delay_ms(2000);
     }
+
+    // if init_camera().is_ok() {
+    //     // Reset terminal
+    //     print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
+    //     while let Ok(pic) = alt_take_pic() {
+    //         // Move to the top left
+    //         print!("{esc}[1;1H", esc = 27 as char);
+    //         // pic.
+    //         image_to_ascii(pic);
+    //         FreeRtos::delay_ms(2000);
+    //     }
+    // } else {
+    //     loop {
+    //         FreeRtos::delay_ms(2000);
+    //         log::info!("Hello, world!");
+    //     }
+    // }
 
 }
 
