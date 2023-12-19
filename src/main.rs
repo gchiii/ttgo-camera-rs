@@ -13,8 +13,8 @@ use esp_idf_hal::{
     prelude::*,
 };
 
-use esp_idf_sys::camera::{self, camera_config_t__bindgen_ty_1, camera_config_t__bindgen_ty_2};
-
+use anyhow::{anyhow, Error};
+use anyhow::Result;
 
 // Chip: ESP32-WROVER-B
 // Protocol: Wi-Fi 802.11 b/g/n & bluetooth 4.2 BLE & BR/EDR
@@ -146,6 +146,18 @@ fn draw_some_text<D: DrawTarget<Color = BinaryColor>>(display: &mut D) where <D 
         .unwrap();
 }
 
+fn take_pic(camera: &Camera<'_>) -> Result<DynamicImage, Error> {
+    if let Some(fb) = camera.get_framebuffer() {
+        let pic = fb.data_as_bmp()?;
+        let image = ImageReader::new(Cursor::new(pic))
+            .with_guessed_format()?
+            .decode()?;
+        Ok(image)
+    } else {
+        Err(anyhow!("Failed to get framebuffer"))
+    }
+}
+
 fn main() {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
@@ -215,23 +227,14 @@ fn main() {
     //     log::error!("{}", e);
     // }
     loop {
-        if let Some(fb) = camera.get_framebuffer() {
-            match fb.data_as_bmp() {
-                Ok(pic) => {
-                    if let Ok(img_reader) = ImageReader::new(Cursor::new(pic)).with_guessed_format() {
-                        match img_reader.decode() {
-                            Ok(image) => {
-                                // Move to the top left
-                                print!("{esc}[1;1H", esc = 27 as char);
-                                // pic.
-                                image_to_ascii(image);
-                            },
-                            Err(e) => log::error!("{}", e),
-                        }
-                    }
-                }
-                Err(e)=> log::error!("{}", e),
-            }
+        match take_pic(&camera) {
+            Ok(image) => {
+                // Move to the top left
+                print!("{esc}[1;1H", esc = 27 as char);
+                // pic.
+                image_to_ascii(image);
+            },
+            Err(e) => log::error!("{}", e),
         }
         FreeRtos::delay_ms(2000);
     }
