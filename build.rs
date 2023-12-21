@@ -18,7 +18,7 @@ fn main() {
         panic!("You need to set the Wi-Fi credentials in `cfg.toml`!");
     }
 
-    if app_config.wifi_ssid == "" || app_config.wifi_psk == "" {
+    if app_config.wifi_ssid.is_empty() || app_config.wifi_psk.is_empty() {
         panic!("You need to set the Wi-Fi credentials in `cfg.toml`!");
     }
 

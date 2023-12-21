@@ -1,27 +1,32 @@
-use std::io::{Cursor, Write, Read};
-use std::net::TcpStream;
-use std::{thread::sleep, time::Duration};
+pub mod wifi;
 
-use esp_idf_svc::hal::{
-    delay::FreeRtos,
-    i2c::{I2cConfig, I2cDriver},
-    peripherals::Peripherals,
-    peripheral::Peripheral,
-    prelude::*
+use anyhow::{anyhow, Error, bail, Result};
+use edge_executor::LocalExecutor;
+
+use std::{
+    io::Cursor,
+    time::Instant,
+    sync::{Arc, Mutex},
 };
-// use embedded_svc::utils::io;
-// use embedded_svc::{
-//     http::client::Client,
-//     io::Write,
-//     wifi::{ClientConfiguration, Configuration},
-// };
-use esp_idf_svc::{eventloop::EspSystemEventLoop, nvs::EspDefaultNvsPartition, wifi::EspWifi};
-use esp_idf_svc::hal::peripheral;
-use esp_idf_svc::{wifi::*, ipv4};
-use esp_idf_svc::eventloop::*;
-use esp_idf_svc::timer::*;
+
+
+// use embedded_svc::wifi::{ClientConfiguration, AccessPointConfiguration};
+use esp_idf_hal::reset::{ResetReason, WakeupReason};
+use esp_idf_svc::{
+    hal::{
+        i2c::{I2cConfig, I2cDriver},
+        peripherals::Peripherals,
+        peripheral::Peripheral,
+        timer::{Timer, TimerDriver},
+        prelude::*
+    },
+    io::Write,
+    eventloop::EspSystemEventLoop,
+    nvs::EspDefaultNvsPartition,
+    wifi::EspWifi,
+    http::server::{Configuration, EspHttpServer},
+};
 use log::*;
-use esp_idf_svc::ping;
 
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
@@ -38,8 +43,8 @@ use embedded_graphics::{
     primitives::{Circle, PrimitiveStyleBuilder, Rectangle, Triangle},
 };
 use ttgo_camera::Camera;
+use crate::wifi::init_wifi;
 
-use anyhow::{anyhow, Error, bail, Result};
 
 #[toml_cfg::toml_config]
 pub struct Config {
@@ -179,136 +184,54 @@ fn take_pic(camera: &Camera<'_>) -> Result<DynamicImage, Error> {
     }
 }
 
-fn ping(ip: ipv4::Ipv4Addr) -> Result<()> {
-    info!("About to do some pings for {:?}", ip);
 
-    let ping_summary = ping::EspPing::default().ping(ip, &Default::default())?;
-    if ping_summary.transmitted != ping_summary.received {
-        bail!("Pinging IP {} resulted in timeouts", ip);
-    }
+fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
+    let mut server = EspHttpServer::new(&Configuration::default())?;
 
-    info!("Pinging done");
+    server.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
+        let mut time = Instant::now();
 
-    Ok(())
+        let lock = cam.lock().unwrap(); // If a thread gets poisoned we're just fucked anyways
+        let fb = match lock.get_framebuffer() {
+            Some(fb) => fb,
+            None => {
+                let mut response = request.into_status_response(500)?;
+                let _ = writeln!(response, "Error: Unable to get framebuffer");
+                return Ok(());
+            }
+        };
+
+        let jpeg = match fb.data_as_jpeg(80) {
+            Ok(jpeg) => jpeg,
+            Err(e) => {
+                let mut response = request.into_status_response(500)?;
+                let _ = writeln!(response, "Error: {:#?}", e);
+                return Ok(());
+            }
+        };
+
+        info!("Took {}ms to capture_jpeg", time.elapsed().as_millis());
+
+        // Send the image
+        time = Instant::now();
+        let mut response = request.into_response(
+            200,
+            None,
+            &[
+                ("Content-Type", "image/jpeg"),
+                ("Content-Length", &jpeg.len().to_string()),
+            ],
+        )?;
+
+        let _ = response.write_all(jpeg);
+        info!("Took {}ms to send image", time.elapsed().as_millis());
+
+        Ok(())
+    })?;
+
+    Ok(server)
 }
 
-fn wifi(
-    modem: impl peripheral::Peripheral<P = esp_idf_svc::hal::modem::Modem> + 'static,
-    sysloop: EspSystemEventLoop,
-    nvs: Option<EspDefaultNvsPartition>,
-) -> Result<Box<EspWifi<'static>>> {
-    let app_config = CONFIG;
-    let ssid: &str = app_config.wifi_ssid;
-    let pass = app_config.wifi_psk;
-
-    info!("ssid = {} pw = {}", ssid, pass);
-
-    let mut esp_wifi = EspWifi::new(modem, sysloop.clone(), nvs)?;
-
-    let mut wifi = BlockingWifi::wrap(&mut esp_wifi, sysloop)?;
-
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
-
-    info!("Starting wifi...");
-
-    wifi.start()?;
-
-    info!("Scanning...");
-
-    let mut ap_infos = wifi.scan()?;
-
-    for ap in &ap_infos {
-        info!("ap {:?}", ap);
-    }
-    let mut ours = ap_infos.into_iter().find(|a| a.ssid == ssid);
-    if ours.is_none() {
-        ap_infos = wifi.scan()?;
-        for ap in &ap_infos {
-            info!("ap {:?}", ap);
-        }
-        ours = ap_infos.into_iter().find(|a| a.ssid == ssid);
-    }
-
-    let channel = if let Some(ours) = ours {
-        info!(
-            "Found configured access point {} on channel {}",
-            ssid, ours.channel
-        );
-        Some(ours.channel)
-    } else {
-        info!(
-            "Configured access point {} not found during scanning, will go with unknown channel",
-            ssid
-        );
-        None
-    };
-    // let client_config = ClientConfiguration {
-    //     ssid: ssid.into(),
-    //     password: pass.into(),
-    //     channel,
-    //     ..Default::default()
-    // };
-    // wifi.set_configuration(&Configuration::Client(client_config))?;
-    wifi.set_configuration(&Configuration::Mixed(
-        ClientConfiguration {
-            ssid: ssid.into(),
-            password: pass.into(),
-            channel,
-            ..Default::default()
-        },
-        AccessPointConfiguration {
-            ssid: "aptest".into(),
-            channel: channel.unwrap_or(1),
-            ..Default::default()
-        },
-    ))?;
-
-    info!("Connecting wifi...");
-
-    wifi.connect()?;
-
-    info!("Waiting for DHCP lease...");
-
-    if let Err(e) = wifi.wait_netif_up() {
-        error!("wifi error: {:?}", e);
-        wifi.connect()?;
-    }
-    wifi.wait_netif_up()?;
-
-    let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
-
-    info!("Wifi DHCP info: {:?}", ip_info);
-
-    ping(ip_info.subnet.gateway)?;
-
-    Ok(Box::new(esp_wifi))
-}
-
-fn test_tcp() -> Result<()> {
-    info!("About to open a TCP connection to 1.1.1.1 port 80");
-
-    let mut stream = TcpStream::connect("one.one.one.one:80")?;
-
-    let err = stream.try_clone();
-    if let Err(err) = err {
-        info!(
-            "Duplication of file descriptors does not work (yet) on the ESP-IDF, as expected: {}",
-            err
-        );
-    }
-
-    stream.write_all("GET / HTTP/1.0\n\n".as_bytes())?;
-
-    let mut result = Vec::new();
-
-    stream.read_to_end(&mut result)?;
-
-    info!(
-        "1.1.1.1 returned:\n=================\n{}\n=================\nSince it returned something, all is OK",
-        std::str::from_utf8(&result)?);
-
-    Ok(())
-}
 
 fn main() -> Result<()> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -319,17 +242,36 @@ fn main() -> Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
     log::info!("Hello, world!");
 
+    let reset_reason = ResetReason::get();
+    info!("Last reset was due to {:#?}", reset_reason);
+    let wakeup_reason = WakeupReason::get();
+    info!("Last wakeup was due to {:#?}", wakeup_reason);
+
+    let executor: LocalExecutor = Default::default();
+    edge_executor::block_on(executor.run(async_main()))
+
+}
+// type OledDisplay<'a> = Ssd1306<I2CInterface<I2cDriver<'a>>, DisplaySize128x64, ssd1306::mode::BufferedGraphicsMode<DisplaySize128x64>> ;
+// fn init_display(peripherals: &Peripherals) -> Result<OledDisplay> {
+//     let i2c = peripherals.i2c0;
+//     let sda = peripherals.pins.gpio21;
+//     let scl = peripherals.pins.gpio22;
+
+//     let config = I2cConfig::new().baudrate(400.kHz().into());
+//     let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
+//     let interface = I2CDisplayInterface::new(i2c);
+//     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate180)
+//         .into_buffered_graphics_mode();
+
+//     display.init().map_err(|err| anyhow!("{:?}", err))?;
+//     Ok(display)
+// }
+
+async fn async_main() -> Result<()> {
     let mut peripherals = Peripherals::take()?;
 
-    let sys_loop =  EspSystemEventLoop::take()?;
-    let nvs = EspDefaultNvsPartition::take()?;
-    // let mut wifi_driver = match EspWifi::new(peripherals.modem, sys_loop, Some(nvs)) {
-    //     Ok(w) => w,
-    //     Err(e) => {
-    //         log::error!("error {:?}", e);
-    //         return;
-    //     },
-    // };
+    let sysloop =  EspSystemEventLoop::take()?;
+    let _nvs = EspDefaultNvsPartition::take()?;
 
     let i2c = peripherals.i2c0;
     let sda = peripherals.pins.gpio21;
@@ -345,14 +287,6 @@ fn main() -> Result<()> {
 
     draw_shapes(&mut display);
     display.flush().map_err(|err| anyhow!("{:?}", err))?;
-
-    let mut wifi = wifi(peripherals.modem, sys_loop.clone(), Some(nvs))?;
-
-    FreeRtos::delay_ms(2000);
-    test_tcp()?;
-
-    // draw_some_text(&mut display);
-    // display.flush().unwrap();
 
     let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
     let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
@@ -375,43 +309,72 @@ fn main() -> Result<()> {
         Some(cam_sda),
         Some(cam_scl),
     )?;
-    // let camera: Camera<'_> = match p_camera {
-    //     Ok(c) => c,
-    //     Err(e) => {
-    //         log::error!("{}", e);
-    //         return;
-    //     },
-    // };
-    let _sensor = camera.sensor();
-    // if let Err(e) = _sensor.set_pixformat(camera::pixformat_t_PIXFORMAT_GRAYSCALE) {
-    //     log::error!("{}", e);
-    // }
-    if let Err(e) = _sensor.init_status() {
-        log::error!("{}", e);
-    }
-    // if let Err(e) = _sensor.set_framesize(framesize) {
-    //     log::error!("{}", e);
-    // }
-    // match wifi_driver.sta_netif().get_ip_info() {
-    //     Ok(ipinfo) => log::info!("IP info: {:?}", ipinfo),
-    //     Err(e) => log::error!("error {:?}", e),
-    // }
-
-    loop {
-        match take_pic(&camera) {
-            Ok(image) => {
-                // Move to the top left
-                // print!("{esc}[1;1H", esc = 27 as char);
-                // pic.
-                image_to_ascii(image);
-            },
-            Err(e) => log::error!("{}", e),
+    let camera_mutex = Arc::new(Mutex::new(camera));
+    if let Ok(c) = camera_mutex.lock() {
+        let _sensor = c.sensor();
+        // if let Err(e) = _sensor.set_pixformat(camera::pixformat_t_PIXFORMAT_GRAYSCALE) {
+        //     log::error!("{}", e);
+        // }
+        if let Err(e) = _sensor.init_status() {
+            log::error!("{}", e);
         }
-        FreeRtos::delay_ms(2000);
-        // match wifi_driver.sta_netif().get_ip_info() {
-        //     Ok(ipinfo) => log::info!("IP info: {:?}", ipinfo),
-        //     Err(e) => log::error!("error {:?}", e),
+        // if let Err(e) = _sensor.set_framesize(framesize) {
+        //     log::error!("{}", e);
         // }
     }
+    let _wifi = init_wifi(
+        CONFIG.wifi_ssid,
+        CONFIG.wifi_psk,
+        &mut peripherals.modem,
+        sysloop.clone(),
+    )
+    .await?;
+
+    init_http(camera_mutex)?;
+
+    Ok(())
+}
+
+async fn main_loop(
+    timer: impl Peripheral<P = impl Timer>,
+    mut wifi: Box<EspWifi<'_>>,
+    sysloop: EspSystemEventLoop,
+) -> Result<()> {
+    let mut delay_driver = TimerDriver::new(timer, &Default::default())?;
+
+    'main: loop {
+        match wifi.is_up() {
+            Ok(false) | Err(_) => {
+                warn!("WiFi died, attempting to reconnect...");
+                let mut counter = 0;
+                loop {
+                    if wifi::connect(
+                        CONFIG.wifi_ssid,
+                        CONFIG.wifi_psk,
+                        sysloop.clone(),
+                        &mut wifi,
+                    )
+                    .await
+                    .is_ok()
+                    {
+                        info!("WiFi reconnected successfully.");
+                        break;
+                    }
+                    counter += 1;
+                    warn!("Failed to connect to wifi, attempt {}", counter);
+
+                    // If we fail to connect for long enough, reset the damn processor
+                    if counter > 10 {
+                        break 'main;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        delay_driver.delay(1000).await?;
+    }
+
+    bail!("Something went horribly wrong!!!")
 }
 
