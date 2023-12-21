@@ -1,17 +1,16 @@
 use std::io::Cursor;
 
-use esp_idf_hal::delay::FreeRtos;
-use esp_idf_hal::i2c::{I2cConfig, I2cDriver};
-use esp_idf_hal::peripheral::Peripheral;
-use esp_idf_sys::EspError;
+use esp_idf_svc::hal::{
+    delay::FreeRtos,
+    i2c::{I2cConfig, I2cDriver},
+    peripherals::Peripherals,
+    peripheral::Peripheral,
+    prelude::*
+};
+
 use image::imageops::FilterType;
 use image::io::Reader as ImageReader;
 use image::{DynamicImage, GenericImageView, ImageError};
-
-use esp_idf_hal::{
-    peripherals::Peripherals,
-    prelude::*,
-};
 
 use anyhow::{anyhow, Error};
 use anyhow::Result;
@@ -163,30 +162,48 @@ fn main() {
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
 
-    let mut peripherals = Peripherals::take().unwrap();
+    // Bind the log crate to the ESP Logging facilities
+    esp_idf_svc::log::EspLogger::initialize_default();
+    log::info!("Hello, world!");
+
+    let mut peripherals = match Peripherals::take() {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("error {}", e);
+            return;
+        },
+    };
     let i2c = peripherals.i2c0;
     let sda = peripherals.pins.gpio21;
     let scl = peripherals.pins.gpio22;
 
     let config = I2cConfig::new().baudrate(400.kHz().into());
-    let i2c = I2cDriver::new(i2c, sda, scl, &config).unwrap();
+    let i2c = match I2cDriver::new(i2c, sda, scl, &config) {
+        Ok(i2c) => i2c,
+        Err(e) => {
+            log::error!("error {}", e);
+            return;
+        },
+    };
     let interface = I2CDisplayInterface::new(i2c);
-    // Command::AllOn(true).send(&mut interface).unwrap();
-    // FreeRtos::delay_ms(2000);
     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate180)
         .into_buffered_graphics_mode();
-    display.init().unwrap();
+
+    if let Err(e) = display.init() {
+        log::error!("error {:?}", e);
+        return;
+    }
 
     draw_shapes(&mut display);
-    display.flush().unwrap();
+    if let Err(e) = display.flush() {
+        log::error!("error {:?}", e);
+        return;
+    }
     FreeRtos::delay_ms(2000);
 
     // draw_some_text(&mut display);
     // display.flush().unwrap();
 
-    // Bind the log crate to the ESP Logging facilities
-    esp_idf_svc::log::EspLogger::initialize_default();
-    log::info!("Hello, world!");
 
     let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
     let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
