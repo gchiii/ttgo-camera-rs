@@ -3,3 +3,5 @@
 /target
 /Cargo.lock
 /esp32-camera
+.env
+cfg.toml
