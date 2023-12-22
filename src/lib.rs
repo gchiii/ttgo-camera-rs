@@ -16,7 +16,10 @@ pub struct FrameBuffer<'a> {
 
 impl<'a> FrameBuffer<'a> {
     pub fn data(&self) -> &'a [u8] {
-        unsafe { std::slice::from_raw_parts((*self.fb).buf, (*self.fb).len) }
+        let fb = unsafe { self.fb.read_unaligned() };
+        let data = unsafe { std::ptr::addr_of!(*fb.buf) };
+        let len = fb.len;
+        unsafe { std::slice::from_raw_parts(data, len) }
     }
 
     pub unsafe fn data_raw(&mut self) -> *mut camera::camera_fb_t {
@@ -66,7 +69,8 @@ impl<'a> FrameBuffer<'a> {
     }
 
     pub fn format(&self) -> camera::pixformat_t {
-        unsafe { (*self.fb).format }
+        unsafe { std::ptr::read_unaligned::<camera::pixformat_t>(std::ptr::addr_of!((*self.fb).format)) }
+        // unsafe { (*self.fb).format }
     }
 
     pub fn timestamp(&self) -> camera::timeval {
@@ -331,7 +335,7 @@ impl<'a> Camera<'a> {
             pixel_format: camera::pixformat_t_PIXFORMAT_JPEG,
             frame_size: camera::framesize_t_FRAMESIZE_QVGA,
 
-            jpeg_quality: 12,
+            jpeg_quality: 20,
             fb_count: 1,
             grab_mode: camera::camera_grab_mode_t_CAMERA_GRAB_WHEN_EMPTY,
 
