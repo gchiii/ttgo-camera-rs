@@ -205,7 +205,7 @@ fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
             Ok(jpeg) => jpeg,
             Err(e) => {
                 let mut response = request.into_status_response(500)?;
-                let _ = writeln!(response, "Error: {:#?}", e);
+                let _ = writeln!(response, "init_http: Error: {:#?}", e);
                 return Ok(());
             }
         };
@@ -251,42 +251,25 @@ fn main() -> Result<()> {
     edge_executor::block_on(executor.run(async_main()))
 
 }
-// type OledDisplay<'a> = Ssd1306<I2CInterface<I2cDriver<'a>>, DisplaySize128x64, ssd1306::mode::BufferedGraphicsMode<DisplaySize128x64>> ;
-// fn init_display(peripherals: &Peripherals) -> Result<OledDisplay> {
-//     let i2c = peripherals.i2c0;
-//     let sda = peripherals.pins.gpio21;
-//     let scl = peripherals.pins.gpio22;
-
-//     let config = I2cConfig::new().baudrate(400.kHz().into());
-//     let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
-//     let interface = I2CDisplayInterface::new(i2c);
-//     let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate180)
-//         .into_buffered_graphics_mode();
-
-//     display.init().map_err(|err| anyhow!("{:?}", err))?;
-//     Ok(display)
-// }
 
 async fn async_main() -> Result<()> {
+    info!("starting async_main");
     let mut peripherals = Peripherals::take()?;
 
     let sysloop =  EspSystemEventLoop::take()?;
-    let _nvs = EspDefaultNvsPartition::take()?;
+    // let _nvs = EspDefaultNvsPartition::take()?;
 
-    let i2c = peripherals.i2c0;
-    let sda = peripherals.pins.gpio21;
-    let scl = peripherals.pins.gpio22;
-
-    let config = I2cConfig::new().baudrate(400.kHz().into());
-    let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
-    let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate180)
-        .into_buffered_graphics_mode();
-
-    display.init().map_err(|err| anyhow!("{:?}", err))?;
-
-    draw_shapes(&mut display);
-    display.flush().map_err(|err| anyhow!("{:?}", err))?;
+    // let i2c = peripherals.i2c0;
+    // let sda = peripherals.pins.gpio21;
+    // let scl = peripherals.pins.gpio22;
+    // let config = I2cConfig::new().baudrate(400.kHz().into());
+    // let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
+    // let interface = I2CDisplayInterface::new(i2c);
+    // let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate180)
+    //     .into_buffered_graphics_mode();
+    // display.init().map_err(|err| anyhow!("{:?}", err))?;
+    // draw_shapes(&mut display);
+    // display.flush().map_err(|err| anyhow!("{:?}", err))?;
 
     let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
     let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
@@ -310,19 +293,16 @@ async fn async_main() -> Result<()> {
         Some(cam_scl),
     )?;
     let camera_mutex = Arc::new(Mutex::new(camera));
-    if let Ok(c) = camera_mutex.lock() {
-        let _sensor = c.sensor();
-        // if let Err(e) = _sensor.set_pixformat(camera::pixformat_t_PIXFORMAT_GRAYSCALE) {
-        //     log::error!("{}", e);
-        // }
-        if let Err(e) = _sensor.init_status() {
-            log::error!("{}", e);
-        }
-        // if let Err(e) = _sensor.set_framesize(framesize) {
-        //     log::error!("{}", e);
-        // }
-    }
-    let _wifi = init_wifi(
+    // if let Ok(c) = camera_mutex.lock() {
+    //     let _sensor = c.sensor();
+    //     if let Err(e) = _sensor.init_status() {
+    //         log::error!("{}", e);
+    //     }
+    //     // if let Err(e) = _sensor.set_framesize(framesize) {
+    //     //     log::error!("{}", e);
+    //     // }
+    // }
+    let wifi = init_wifi(
         CONFIG.wifi_ssid,
         CONFIG.wifi_psk,
         &mut peripherals.modem,
@@ -332,7 +312,7 @@ async fn async_main() -> Result<()> {
 
     init_http(camera_mutex)?;
 
-    Ok(())
+    main_loop(peripherals.timer00, wifi, sysloop).await
 }
 
 async fn main_loop(

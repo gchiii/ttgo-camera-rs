@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::peripheral,

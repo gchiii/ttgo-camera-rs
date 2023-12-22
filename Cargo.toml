@@ -25,11 +25,21 @@ embassy = ["esp-idf-svc/embassy-sync", "esp-idf-svc/critical-section", "esp-idf-
 
 [dependencies]
 log = { version = "0.4", default-features = false }
-embedded-svc = { version = "0.26.4", default-features = false, features = ["std"]}
-esp-idf-svc = { version = "0.47.3", default-features = false }
+esp-idf-svc = { version = "0.47.3", default-features = false, features = [
+    "native",
+    "std",
+    "binstart",
+    "alloc",
+    "nightly",
+    "experimental",
+    "embassy-sync",
+    "critical-section",
+    "embassy-time-driver",
+]}
 esp-idf-hal = "0.42.5"
 esp-idf-sys = "0.33.7"
 ssd1306 = "0.8.4"
+embedded-svc = { version = "0.26.4", default-features = false, features = ["std"]}
 embedded-graphics = "0.8.1"
 image = { version = "0.24.7", default-features = false, features = ["bmp", "jpeg"] }
 toml-cfg = "=0.1.3"
