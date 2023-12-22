@@ -1,11 +1,10 @@
 pub mod wifi;
 
-use anyhow::{anyhow, Error, bail, Result};
+use anyhow::{bail, Result};
 use edge_executor::LocalExecutor;
-use embedded_svc::http::server::Request;
+
 
 use std::{
-    io::Cursor,
     time::{Instant, Duration},
     sync::{Arc, Mutex},
 };
@@ -13,16 +12,14 @@ use std::{
 use esp_idf_hal::reset::{ResetReason, WakeupReason};
 use esp_idf_svc::{
     hal::{
-        i2c::{I2cConfig, I2cDriver},
         peripherals::Peripherals,
         peripheral::Peripheral,
-        timer::{Timer, TimerDriver},
-        prelude::*
+        timer::{Timer, TimerDriver}
     },
     io::Write,
     eventloop::EspSystemEventLoop,
     wifi::EspWifi,
-    http::server::{Configuration, EspHttpServer, EspHttpConnection},
+    http::server::{Configuration, EspHttpServer},
 };
 use log::*;
 
