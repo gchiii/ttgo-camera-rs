@@ -1,7 +1,7 @@
-pub mod wifi;
 
 use anyhow::{bail, Result};
 use edge_executor::LocalExecutor;
+use ssd1306::{rotation::DisplayRotation, size::DisplaySize128x64, mode::DisplayConfig};
 
 
 use std::{
@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use esp_idf_hal::reset::{ResetReason, WakeupReason};
+use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::PinDriver};
 use esp_idf_svc::{
     hal::{
         peripherals::Peripherals,
@@ -24,8 +24,9 @@ use esp_idf_svc::{
 use log::*;
 
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use ttgo_camera::Camera;
-use crate::wifi::init_wifi;
+use ttgo_camera::{small_display::{init_display, draw_shapes}, wifi::init_wifi};
+use ttgo_camera::esp_camera::Camera;
+use ttgo_camera::wifi;
 
 
 #[toml_cfg::toml_config]
@@ -43,11 +44,14 @@ pub struct Config {
 // Display chip: SSD1306 I2C
 // Display type: OLED
 // Display resolution: 128×64
-// PIR: AS312
+// PIR: AS312   - on GPIO 33
 // UART chip: CP2104
 // Charging chip: IP5306 I2C
 // Camera: OV2640
 // Camera Resolution: 2 Megapixel
+
+// PIR input GPIO33
+// BUTTON input GPIO 34
 
 // this is from https://makeradvisor.com/esp32-ttgo-t-camera-pir-sensor-oled/
 // const CAM_PIN_PWDN: ::std::os::raw::c_int = 26;   // define PWDN_GPIO_NUM -1
@@ -75,84 +79,6 @@ fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
     httpd_config.session_timeout = Duration::from_secs(5*50);
     httpd_config.uri_match_wildcard = true;
     let mut server = EspHttpServer::new(&httpd_config)?;
-    // use esp_idf_svc::http::server::{
-    //     fn_handler, Connection, EspHttpServer, Handler, HandlerResult, Method, Middleware,
-    // };
-
-    // struct SampleMiddleware;
-
-    // impl<'a> Middleware<EspHttpConnection<'a>> for SampleMiddleware {
-    //     fn handle<H>(&self, conn: &mut EspHttpConnection<'a>, handler: &H) -> HandlerResult
-    //     where
-    //         H: Handler<EspHttpConnection<'a>>,
-    //     {
-    //         info!("Middleware called with uri: {}", conn.uri());
-
-    //         if let Err(err) = handler.handle(conn) {
-    //             if !conn.is_response_initiated() {
-    //                 let mut resp = Request::wrap(conn).into_status_response(500)?;
-
-    //                 write!(&mut resp, "ERROR: {err}")?;
-    //             } else {
-    //                 // Nothing can be done as the error happened after the response was initiated, propagate further
-    //                 return Err(err);
-    //             }
-    //         }
-
-    //         Ok(())
-    //     }
-    // }
-
-    // struct SampleMiddleware2;
-
-    // impl<'a> Middleware<EspHttpConnection<'a>> for SampleMiddleware2 {
-    //     fn handle<H>(&self, conn: &mut EspHttpConnection<'a>, handler: &H) -> HandlerResult
-    //     where
-    //         H: Handler<EspHttpConnection<'a>>,
-    //     {
-    //         info!("Middleware2 called");
-
-    //         handler.handle(conn)
-    //     }
-    // }
-
-    // let mut server = EspHttpServer::new(&Default::default())?;
-
-    // server
-    //     .fn_handler("/", Method::Get, |req| {
-    //         req.into_ok_response()?
-    //             .write_all("Hello from Rust!".as_bytes())?;
-
-    //         Ok(())
-    //     })?
-    //     .fn_handler("/foo", Method::Get, |_| {
-    //         Result::Err("Boo, something happened!".into())
-    //     })?
-    //     .fn_handler("/bar", Method::Get, |req| {
-    //         req.into_response(403, Some("No permissions"), &[])?
-    //             .write_all("You have no permissions to access this page".as_bytes())?;
-
-    //         Ok(())
-    //     })?
-    //     .fn_handler("/panic", Method::Get, |_| panic!("User requested a panic!"))?
-    //     .handler(
-    //         "/middleware",
-    //         Method::Get,
-    //         SampleMiddleware {}.compose(fn_handler(|_| {
-    //             Result::Err("Boo, something happened!".into())
-    //         })),
-    //     )?
-    //     .handler(
-    //         "/middleware2",
-    //         Method::Get,
-    //         SampleMiddleware2 {}.compose(SampleMiddleware {}.compose(fn_handler(|req| {
-    //             req.into_ok_response()?
-    //                 .write_all("Middleware2 handler called".as_bytes())?;
-
-    //             Ok(())
-    //         }))),
-    //     )?;
-
 
     server.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
         let mut time = Instant::now();
@@ -225,17 +151,14 @@ async fn async_main() -> Result<()> {
     let sysloop =  EspSystemEventLoop::take()?;
     // let _nvs = EspDefaultNvsPartition::take()?;
 
-    // let i2c = peripherals.i2c0;
-    // let sda = peripherals.pins.gpio21;
-    // let scl = peripherals.pins.gpio22;
-    // let config = I2cConfig::new().baudrate(400.kHz().into());
-    // let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
-    // let interface = I2CDisplayInterface::new(i2c);
-    // let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate180)
-    //     .into_buffered_graphics_mode();
-    // display.init().map_err(|err| anyhow!("{:?}", err))?;
-    // draw_shapes(&mut display);
-    // display.flush().map_err(|err| anyhow!("{:?}", err))?;
+    let i2c = peripherals.i2c0;
+    let sda = peripherals.pins.gpio21;
+    let scl = peripherals.pins.gpio22;
+    let mut display = init_display(i2c, sda, scl, DisplaySize128x64, DisplayRotation::Rotate0)?
+        .into_buffered_graphics_mode();
+    display.init().map_err(|err| anyhow::anyhow!("{:?}", err))?;
+    draw_shapes(&mut display);
+    display.flush().map_err(|err| anyhow::anyhow!("{:?}", err))?;
 
     let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
     let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
@@ -283,6 +206,8 @@ async fn async_main() -> Result<()> {
             return Err(e);
         },
     };
+    // let button = PinDriver::input(peripherals.pins.gpio34)?;
+    let pir = PinDriver::input(peripherals.pins.gpio33);
 
     let main_loop = main_loop(peripherals.timer00, wifi, sysloop).await;
     drop(_httpd);
