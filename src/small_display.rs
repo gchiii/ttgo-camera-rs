@@ -1,20 +1,22 @@
 
 
+use display_interface::DisplayError;
+use embedded_graphics::prelude::*;
+use embedded_graphics::mono_font::MonoTextStyle;
 
+use esp_idf_hal::prelude::*;
 
 use esp_idf_hal::{gpio::{InputPin, OutputPin}, i2c::I2c};
 
 use esp_idf_svc::{
     hal::{
         i2c::{I2cConfig, I2cDriver},
-        peripheral::Peripheral,
-        prelude::*
+        peripheral::Peripheral
     },
 };
 
-
-
-
+use ssd1306::mode::BufferedGraphicsMode;
+use thiserror::Error;
 
 
 use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
@@ -23,15 +25,72 @@ use embedded_graphics::{
     draw_target::DrawTarget,
     mono_font::{ascii::FONT_6X12, MonoTextStyleBuilder},
     pixelcolor::BinaryColor,
-    prelude::*,
     text::{Baseline, Text},
     primitives::{Circle, PrimitiveStyleBuilder, Rectangle, Triangle},
 };
 
+#[derive(Error, Debug)]
+pub enum SmallDisplayError {
+    #[error("DrawTarget Error: {0}")]
+    Draw(String),
+
+    #[error("DisplayError: {0:?}")]
+    Display(DisplayError),
+    // #[error("the data for key `{0}` is not available")]
+    // Redaction(String),
+    // #[error("invalid header (expected {expected:?}, found {found:?})")]
+    // InvalidHeader {
+    //     expected: String,
+    //     found: String,
+    // },
+    #[error("unknown data store error")]
+    Unknown,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct SmallDisplay<'d, DI, SIZE, MODE, COLOR> {
+    display: Ssd1306<DI, SIZE, MODE>,
+    text_style: MonoTextStyle<'d, COLOR>,
+}
+
+impl<'d, DI, SIZE> SmallDisplay<'d, DI, SIZE, BufferedGraphicsMode<SIZE>, BinaryColor>
+where
+    DI: WriteOnlyDataCommand,
+    SIZE: DisplaySize,
+{
+    pub fn new(
+        interface: DI,
+        size: SIZE,
+        rotation: DisplayRotation,
+    ) -> Self where SIZE: DisplaySize {
+        let display = Ssd1306::new(interface, size, rotation).into_buffered_graphics_mode();
+        let text_style = MonoTextStyleBuilder::new()
+            .font(&FONT_6X12)
+            .text_color(BinaryColor::On)
+            .build();
+        Self { display , text_style}
+    }
+    pub fn init(&mut self) -> Result<(), SmallDisplayError> {
+        self.display.init().map_err(SmallDisplayError::Display)
+    }
+    pub fn flush(&mut self) -> Result<(), SmallDisplayError> {
+        self.display.flush().map_err(SmallDisplayError::Display)
+    }
+
+    pub fn write_text(&mut self, text: &str, position: Point, baseline: Baseline) -> Result<Point, SmallDisplayError> {
+        match Text::with_baseline(text, position, self.text_style, baseline).draw(&mut self.display) {
+            Ok(p) => Ok(p),
+            Err(e) => Err(SmallDisplayError::Draw(format!("{:?}", e))),
+        }
+    }
+
+}
+
+
 // type DisplayType<T> = impl DrawTarget<Color = T>;
 // type SmallDisplay<'d> = Ssd1306<I2CInterface<I2cDriver<'d>>, DisplaySize128x64, ssd1306::mode::BasicMode>;
 // type SmallDisplay<'d, SIZE, MODE> where SIZE: DisplaySize = Ssd1306<I2CInterface<I2cDriver<'d>>, SIZE, MODE>;
-type SmallDisplay<'d, SIZE, MODE> = Ssd1306<I2CInterface<I2cDriver<'d>>, SIZE, MODE>;
+// type SmallDisplay<'d, SIZE, MODE> = Ssd1306<I2CInterface<I2cDriver<'d>>, SIZE, MODE>;
 
 pub fn init_display<'d>(
     i2c: impl Peripheral<P = impl I2c> + 'd,
@@ -47,7 +106,9 @@ pub fn init_display<'d>(
     Ok(disp)
 }
 
-pub fn draw_shapes<D: DrawTarget<Color = BinaryColor>>(display: &mut D) where <D as DrawTarget>::Error: std::fmt::Debug
+// type SmallTarget<E> = DrawTarget<Color = BinaryColor, Error = E>;
+pub fn draw_shapes<D, E>(display: &mut D) where D: DrawTarget<Color = BinaryColor, Error = E>, E: std::fmt::Debug
+// pub fn draw_shapes<D: DrawTarget<Color = BinaryColor>>(display: &mut D) where <D as DrawTarget>::Error: std::fmt::Debug
 {
     let yoffset = 8;
 

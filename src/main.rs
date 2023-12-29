@@ -1,15 +1,18 @@
 
 use anyhow::{bail, Result};
 use edge_executor::LocalExecutor;
-use ssd1306::{rotation::DisplayRotation, size::DisplaySize128x64, mode::DisplayConfig};
+use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
+
+use ssd1306::{rotation::DisplayRotation, size::DisplaySize128x64, mode::DisplayConfig, I2CDisplayInterface};
 
 
 use std::{
     time::{Instant, Duration},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex}, net::Ipv4Addr,
 };
 
-use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::PinDriver};
+use esp_idf_hal::units::*;
+use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::PinDriver, i2c::{I2cConfig, I2cDriver}};
 use esp_idf_svc::{
     hal::{
         peripherals::Peripherals,
@@ -19,12 +22,12 @@ use esp_idf_svc::{
     io::Write,
     eventloop::EspSystemEventLoop,
     wifi::EspWifi,
-    http::server::{Configuration, EspHttpServer},
+    http::server::{EspHttpServer},
 };
 use log::*;
 
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use ttgo_camera::{small_display::{init_display, draw_shapes}, wifi::init_wifi};
+use ttgo_camera::{small_display::{SmallDisplay}, wifi::init_wifi};
 use ttgo_camera::esp_camera::Camera;
 use ttgo_camera::wifi;
 
@@ -75,9 +78,11 @@ pub struct Config {
 
 
 fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
-    let mut httpd_config = Configuration::default();
-    httpd_config.session_timeout = Duration::from_secs(5*50);
-    httpd_config.uri_match_wildcard = true;
+    let httpd_config = esp_idf_svc::http::server::Configuration {
+        session_timeout: Duration::from_secs(5*50),
+        uri_match_wildcard: true,
+        ..Default::default()
+    };
     let mut server = EspHttpServer::new(&httpd_config)?;
 
     server.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
@@ -154,11 +159,17 @@ async fn async_main() -> Result<()> {
     let i2c = peripherals.i2c0;
     let sda = peripherals.pins.gpio21;
     let scl = peripherals.pins.gpio22;
-    let mut display = init_display(i2c, sda, scl, DisplaySize128x64, DisplayRotation::Rotate0)?
-        .into_buffered_graphics_mode();
-    display.init().map_err(|err| anyhow::anyhow!("{:?}", err))?;
-    draw_shapes(&mut display);
-    display.flush().map_err(|err| anyhow::anyhow!("{:?}", err))?;
+    let config: esp_idf_hal::i2c::config::Config = I2cConfig::new().baudrate(400.kHz().into());
+    let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
+    let interface = I2CDisplayInterface::new(i2c);
+    let mut display = SmallDisplay::new(interface, DisplaySize128x64, DisplayRotation::Rotate0);
+    display.init()?;
+
+    // let mut display = init_display(i2c, sda, scl, DisplaySize128x64, DisplayRotation::Rotate0)?
+    //     .into_buffered_graphics_mode();
+    // display.init().map_err(|err| anyhow::anyhow!("{:?}", err))?;
+    // draw_shapes(&mut display);
+    // display.flush().map_err(|err| anyhow::anyhow!("{:?}", err))?;
 
     let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
     let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
@@ -207,7 +218,7 @@ async fn async_main() -> Result<()> {
         },
     };
     // let button = PinDriver::input(peripherals.pins.gpio34)?;
-    let pir = PinDriver::input(peripherals.pins.gpio33);
+    let _pir = PinDriver::input(peripherals.pins.gpio33);
 
     let main_loop = main_loop(peripherals.timer00, wifi, sysloop).await;
     drop(_httpd);
@@ -220,7 +231,12 @@ async fn main_loop(
     sysloop: EspSystemEventLoop,
 ) -> Result<()> {
     let mut delay_driver = TimerDriver::new(timer, &Default::default())?;
-
+    let mut ip_info: IpInfo = IpInfo {
+        ip: Ipv4Addr::new(10, 10, 10, 10),
+        subnet: Subnet { gateway: Ipv4Addr::new(10, 10, 10, 1), mask: Mask(255) },
+        dns: None,
+        secondary_dns: None,
+    };
     'main: loop {
         match wifi.is_up() {
             Ok(false) | Err(_) => {
@@ -247,8 +263,21 @@ async fn main_loop(
                         break 'main;
                     }
                 }
-            }
-            _ => {}
+            },
+            Ok(true) => {
+                match wifi.sta_netif().get_ip_info() {
+                    Ok(info) => {
+                        if info != ip_info {
+                            ip_info = info;
+                            println!("My Address is: {}", info.ip);
+                        }
+                    },
+                    Err(e) => {
+                        error!("couldn't get ip address: {:?}", e);
+                    },
+                }
+
+            },
         }
 
         delay_driver.delay(1000).await?;
