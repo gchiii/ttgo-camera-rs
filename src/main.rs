@@ -1,9 +1,11 @@
 
 use anyhow::{bail, Result};
+use display_interface::WriteOnlyDataCommand;
 use edge_executor::LocalExecutor;
+use embedded_graphics::{geometry::Point, text::Baseline, pixelcolor::BinaryColor};
 use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
 
-use ssd1306::{rotation::DisplayRotation, size::DisplaySize128x64, I2CDisplayInterface};
+use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64, DisplaySize}, I2CDisplayInterface, mode::BufferedGraphicsMode};
 
 
 use std::{
@@ -193,15 +195,6 @@ async fn async_main() -> Result<()> {
         Some(cam_scl),
     )?;
     let camera_mutex = Arc::new(Mutex::new(camera));
-    // if let Ok(c) = camera_mutex.lock() {
-    //     let _sensor = c.sensor();
-    //     if let Err(e) = _sensor.init_status() {
-    //         log::error!("{}", e);
-    //     }
-    //     // if let Err(e) = _sensor.set_framesize(framesize) {
-    //     //     log::error!("{}", e);
-    //     // }
-    // }
     let wifi = init_wifi(
         CONFIG.wifi_ssid,
         CONFIG.wifi_psk,
@@ -220,16 +213,21 @@ async fn async_main() -> Result<()> {
     // let button = PinDriver::input(peripherals.pins.gpio34)?;
     let _pir = PinDriver::input(peripherals.pins.gpio33);
 
-    let main_loop = main_loop(peripherals.timer00, wifi, sysloop).await;
+    let main_loop = main_loop(peripherals.timer00, wifi, sysloop, display).await;
     drop(_httpd);
     main_loop
 }
 
-async fn main_loop(
+async fn main_loop<DI, SIZE>(
     timer: impl Peripheral<P = impl Timer>,
     mut wifi: Box<EspWifi<'_>>,
     sysloop: EspSystemEventLoop,
-) -> Result<()> {
+    mut display: SmallDisplay<'_, DI, SIZE, BufferedGraphicsMode<SIZE>, BinaryColor>,
+) -> Result<()>
+where
+DI: WriteOnlyDataCommand,
+SIZE: DisplaySize,
+{
     let mut delay_driver = TimerDriver::new(timer, &Default::default())?;
     let mut ip_info: IpInfo = IpInfo {
         ip: Ipv4Addr::new(10, 10, 10, 10),
@@ -270,6 +268,12 @@ async fn main_loop(
                         if info != ip_info {
                             ip_info = info;
                             println!("My Address is: {}", info.ip);
+                            if let Err(e) = display.write_text(&format!("{:?}", ip_info), Point::zero(), Baseline::Top) {
+                                error!("couldn't wire IP address: {:?}", e);
+                            }
+                            if let Err(e) = display.flush() {
+                                error!("error: {:?}", e);
+                            }
                         }
                     },
                     Err(e) => {
