@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use edge_executor::LocalExecutor;
 use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
 
-use ssd1306::{rotation::DisplayRotation, size::DisplaySize128x64, mode::DisplayConfig, I2CDisplayInterface};
+use ssd1306::{rotation::DisplayRotation, size::DisplaySize128x64, I2CDisplayInterface};
 
 
 use std::{
@@ -22,12 +22,12 @@ use esp_idf_svc::{
     io::Write,
     eventloop::EspSystemEventLoop,
     wifi::EspWifi,
-    http::server::{EspHttpServer},
+    http::server::EspHttpServer,
 };
 use log::*;
 
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use ttgo_camera::{small_display::{SmallDisplay}, wifi::init_wifi};
+use ttgo_camera::{small_display::SmallDisplay, wifi::init_wifi};
 use ttgo_camera::esp_camera::Camera;
 use ttgo_camera::wifi;
 
