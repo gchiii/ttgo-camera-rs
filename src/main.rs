@@ -90,7 +90,9 @@ fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
     server.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
         let mut time = Instant::now();
         info!("handling request");
-        let lock = cam.lock().unwrap(); // If a thread gets poisoned we're just fucked anyways
+        let lock = cam.lock().unwrap(); // If a thread gets poisoned we're just dead anyways
+        let _sensor = lock.sensor();
+
         let fb = match lock.get_framebuffer() {
             Some(fb) => fb,
             None => {

@@ -7,6 +7,7 @@ use esp_idf_hal::{
     gpio::*
 };
 use esp_idf_svc::sys::{camera, EspError, esp};
+use esp_idf_sys::camera::*;
 
 pub struct FrameBuffer<'a> {
     fb: *mut camera::camera_fb_t,
@@ -260,6 +261,32 @@ impl<'a> CameraSensor<'a> {
     }
 }
 
+pub enum GrabMode {
+    #[doc = "< Fills buffers when they are empty. Less resources but first 'fb_count' frames might be old"]
+    CameraGrabWhenEmpty,
+    #[doc = "< Except when 1 frame buffer is used, queue will always contain the last 'fb_count' frames"]
+    CameraGrabLatest,
+}
+
+impl From<GrabMode> for u32 {
+    fn from(value: GrabMode) -> Self {
+        match value {
+            GrabMode::CameraGrabWhenEmpty => esp_idf_sys::camera::camera_grab_mode_t_CAMERA_GRAB_WHEN_EMPTY,
+            GrabMode::CameraGrabLatest => esp_idf_sys::camera::camera_grab_mode_t_CAMERA_GRAB_LATEST,
+        }
+    }
+}
+
+impl From<u32> for GrabMode {
+    fn from(value: u32) -> Self {
+        match value {
+            esp_idf_sys::camera::camera_grab_mode_t_CAMERA_GRAB_WHEN_EMPTY => GrabMode::CameraGrabWhenEmpty,
+            esp_idf_sys::camera::camera_grab_mode_t_CAMERA_GRAB_LATEST => GrabMode::CameraGrabLatest,
+            _ => GrabMode::CameraGrabWhenEmpty
+        }
+    }
+}
+
 pub struct Camera<'a> {
     _p: PhantomData<&'a ()>,
 }
@@ -337,8 +364,8 @@ impl<'a> Camera<'a> {
             frame_size: camera::framesize_t_FRAMESIZE_VGA,
 
             jpeg_quality: 12,
-            fb_count: 1,
-            grab_mode: camera::camera_grab_mode_t_CAMERA_GRAB_WHEN_EMPTY,
+            fb_count: 4,
+            grab_mode: GrabMode::CameraGrabLatest.into(),
 
             ..Default::default()
         };
