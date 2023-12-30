@@ -1,7 +1,7 @@
 
 use anyhow::{bail, Result};
 
-use edge_executor::{LocalExecutor};
+use edge_executor::{LocalExecutor, Executor};
 use embedded_graphics::{geometry::Point, text::{Baseline, Text}, pixelcolor::BinaryColor, mono_font::{MonoTextStyleBuilder, ascii::FONT_6X12}, Drawable};
 use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
 
@@ -137,6 +137,7 @@ fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
 }
 
 async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::Receiver<String>) {
+    println!("started display_runner!!!!!!!");
     let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
         .into_buffered_graphics_mode();
     draw_shapes(&mut display);
@@ -181,6 +182,14 @@ fn main() -> Result<()> {
     let wakeup_reason = WakeupReason::get();
     info!("Last wakeup was due to {:#?}", wakeup_reason);
 
+    let executor: LocalExecutor = Default::default();
+    // let executor = Executor::new();
+    // executor.spawn(display_runner(sd_iface, rx)).detach();
+    edge_executor::block_on(executor.run(async_main()))
+}
+
+async fn async_main() -> Result<()> {
+    info!("starting async_main");
     let mut peripherals = Peripherals::take()?;
 
     let i2c = peripherals.i2c0;
@@ -213,31 +222,18 @@ fn main() -> Result<()> {
     let sysloop =  EspSystemEventLoop::take()?;
 
     let delay_driver = TimerDriver::new(peripherals.timer00, &Default::default())?;
-    let wifi = init_wifi(
+    let wifi: Box<EspWifi<'_>> = init_wifi(
         CONFIG.wifi_ssid,
         CONFIG.wifi_psk,
         &mut peripherals.modem,
         sysloop.clone(),
-    );
+    ).await?;
 
-    let executor: LocalExecutor = Default::default();
     let (tx, rx) = flume::unbounded::<String>();
+    let executor: Executor<'_, 64> = Executor::new();
     executor.spawn(display_runner(sd_iface, rx)).detach();
-    edge_executor::block_on(executor.run(async_main(delay_driver, camera, wifi, tx, sysloop)))
-
-}
-
-async fn async_main<'a>(delay_driver: TimerDriver<'_>, camera: Camera<'_>, wifi: impl Future<Output = Result<Box<EspWifi<'a>>>>, tx: flume::Sender<String>, sysloop: EspEventLoop<System>) -> Result<()> {
-    info!("starting async_main");
 
     let camera_mutex = Arc::new(Mutex::new(camera));
-    // let wifi = init_wifi(
-    //     CONFIG.wifi_ssid,
-    //     CONFIG.wifi_psk,
-    //     &mut peripherals.modem,
-    //     sysloop.clone(),
-    // )
-    let wifi = wifi.await?;
 
     let _httpd = match init_http(camera_mutex) {
         Ok(h) => h,
