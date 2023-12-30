@@ -7,7 +7,8 @@ use esp_idf_hal::{
     gpio::*
 };
 use esp_idf_svc::sys::{camera, EspError, esp};
-use esp_idf_sys::camera::*;
+use esp_idf_sys::camera::camera_grab_mode_t_CAMERA_GRAB_LATEST;
+
 
 pub struct FrameBuffer<'a> {
     fb: *mut camera::camera_fb_t,
@@ -364,8 +365,8 @@ impl<'a> Camera<'a> {
             frame_size: camera::framesize_t_FRAMESIZE_VGA,
 
             jpeg_quality: 12,
-            fb_count: 4,
-            grab_mode: GrabMode::CameraGrabLatest.into(),
+            fb_count: 1,
+            grab_mode: camera_grab_mode_t_CAMERA_GRAB_LATEST,
 
             ..Default::default()
         };

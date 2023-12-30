@@ -1,37 +1,40 @@
 
 use anyhow::{bail, Result};
-use display_interface::WriteOnlyDataCommand;
-use edge_executor::LocalExecutor;
-use embedded_graphics::{geometry::Point, text::Baseline, pixelcolor::BinaryColor};
+
+use edge_executor::{LocalExecutor};
+use embedded_graphics::{geometry::Point, text::{Baseline, Text}, pixelcolor::BinaryColor, mono_font::{MonoTextStyleBuilder, ascii::FONT_6X12}, Drawable};
 use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
 
-use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64, DisplaySize}, I2CDisplayInterface, mode::BufferedGraphicsMode};
+use flume::{Selector};
+
+use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64}, prelude::I2CInterface};
 
 
 use std::{
     time::{Instant, Duration},
-    sync::{Arc, Mutex}, net::Ipv4Addr,
+    sync::{Arc, Mutex}, net::Ipv4Addr, future::Future,
 };
 
-use esp_idf_hal::units::*;
-use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::PinDriver, i2c::{I2cConfig, I2cDriver}};
+
+use esp_idf_hal::{reset::{ResetReason, WakeupReason}, i2c::{I2cDriver}};
 use esp_idf_svc::{
     hal::{
         peripherals::Peripherals,
         peripheral::Peripheral,
-        timer::{Timer, TimerDriver}
+        timer::{TimerDriver}
     },
     io::Write,
-    eventloop::EspSystemEventLoop,
+    eventloop::{EspSystemEventLoop, EspEventLoop, System},
     wifi::EspWifi,
     http::server::EspHttpServer,
 };
 use log::*;
 
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use ttgo_camera::{small_display::SmallDisplay, wifi::init_wifi};
+use ttgo_camera::wifi::init_wifi;
 use ttgo_camera::esp_camera::Camera;
 use ttgo_camera::wifi;
+use ttgo_camera::small_display::*;
 
 
 #[toml_cfg::toml_config]
@@ -133,6 +136,36 @@ fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
     Ok(server)
 }
 
+async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::Receiver<String>) {
+    let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
+        .into_buffered_graphics_mode();
+    draw_shapes(&mut display);
+    if let Err(e) = display.flush() {
+        error!("error: {:?}", e);
+    }
+    let text_style = MonoTextStyleBuilder::new()
+        .font(&FONT_6X12)
+        .text_color(BinaryColor::On)
+        .build();
+
+    loop {
+        Selector::new()
+            .recv(&rx, |thing| {
+                match thing {
+                    Ok(text) => {
+                        if let Err(e) = Text::with_baseline(text.as_str(), Point::zero(), text_style, Baseline::Top).draw(&mut display) {
+                            error!("error: {:?}", e);
+                        }
+                    },
+                    Err(e) => {
+                        error!("error: {:?}", e);
+                    },
+                }
+            })
+            .wait();
+    }
+}
+
 
 fn main() -> Result<()> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -148,32 +181,12 @@ fn main() -> Result<()> {
     let wakeup_reason = WakeupReason::get();
     info!("Last wakeup was due to {:#?}", wakeup_reason);
 
-    let executor: LocalExecutor = Default::default();
-    edge_executor::block_on(executor.run(async_main()))
-
-}
-
-async fn async_main() -> Result<()> {
-    info!("starting async_main");
     let mut peripherals = Peripherals::take()?;
-
-    let sysloop =  EspSystemEventLoop::take()?;
-    // let _nvs = EspDefaultNvsPartition::take()?;
 
     let i2c = peripherals.i2c0;
     let sda = peripherals.pins.gpio21;
     let scl = peripherals.pins.gpio22;
-    let config: esp_idf_hal::i2c::config::Config = I2cConfig::new().baudrate(400.kHz().into());
-    let i2c = I2cDriver::new(i2c, sda, scl, &config)?;
-    let interface = I2CDisplayInterface::new(i2c);
-    let mut display = SmallDisplay::new(interface, DisplaySize128x64, DisplayRotation::Rotate0);
-    display.init()?;
-
-    // let mut display = init_display(i2c, sda, scl, DisplaySize128x64, DisplayRotation::Rotate0)?
-    //     .into_buffered_graphics_mode();
-    // display.init().map_err(|err| anyhow::anyhow!("{:?}", err))?;
-    // draw_shapes(&mut display);
-    // display.flush().map_err(|err| anyhow::anyhow!("{:?}", err))?;
+    let sd_iface = bld_interface(i2c, sda, scl)?;
 
     let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
     let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
@@ -196,14 +209,35 @@ async fn async_main() -> Result<()> {
         Some(cam_sda),
         Some(cam_scl),
     )?;
-    let camera_mutex = Arc::new(Mutex::new(camera));
+
+    let sysloop =  EspSystemEventLoop::take()?;
+
+    let delay_driver = TimerDriver::new(peripherals.timer00, &Default::default())?;
     let wifi = init_wifi(
         CONFIG.wifi_ssid,
         CONFIG.wifi_psk,
         &mut peripherals.modem,
         sysloop.clone(),
-    )
-    .await?;
+    );
+
+    let executor: LocalExecutor = Default::default();
+    let (tx, rx) = flume::unbounded::<String>();
+    executor.spawn(display_runner(sd_iface, rx)).detach();
+    edge_executor::block_on(executor.run(async_main(delay_driver, camera, wifi, tx, sysloop)))
+
+}
+
+async fn async_main<'a>(delay_driver: TimerDriver<'_>, camera: Camera<'_>, wifi: impl Future<Output = Result<Box<EspWifi<'a>>>>, tx: flume::Sender<String>, sysloop: EspEventLoop<System>) -> Result<()> {
+    info!("starting async_main");
+
+    let camera_mutex = Arc::new(Mutex::new(camera));
+    // let wifi = init_wifi(
+    //     CONFIG.wifi_ssid,
+    //     CONFIG.wifi_psk,
+    //     &mut peripherals.modem,
+    //     sysloop.clone(),
+    // )
+    let wifi = wifi.await?;
 
     let _httpd = match init_http(camera_mutex) {
         Ok(h) => h,
@@ -212,31 +246,48 @@ async fn async_main() -> Result<()> {
             return Err(e);
         },
     };
-    // let button = PinDriver::input(peripherals.pins.gpio34)?;
-    let _pir = PinDriver::input(peripherals.pins.gpio33);
 
-    let main_loop = main_loop(peripherals.timer00, wifi, sysloop, display).await;
+    // let _pir = PinDriver::input(peripherals.pins.gpio33);
+
+    let main_loop = main_loop(delay_driver, wifi, sysloop, tx).await;
     drop(_httpd);
     main_loop
 }
 
-async fn main_loop<DI, SIZE>(
-    timer: impl Peripheral<P = impl Timer>,
-    mut wifi: Box<EspWifi<'_>>,
+
+// async fn main_loop<DI, SIZE>(
+//     timer: impl Peripheral<P = impl Timer>,
+//     mut wifi: Box<EspWifi<'_>>,
+//     sysloop: EspSystemEventLoop,
+//     mut display: SmallDisplay<'_, DI, SIZE, BufferedGraphicsMode<SIZE>, BinaryColor>,
+// ) -> Result<()>
+// where
+// DI: WriteOnlyDataCommand,
+// SIZE: DisplaySize,
+async fn main_loop<'d>(
+    mut delay_driver: TimerDriver<'_>,
+    mut wifi: Box<EspWifi<'d>>,
     sysloop: EspSystemEventLoop,
-    mut display: SmallDisplay<'_, DI, SIZE, BufferedGraphicsMode<SIZE>, BinaryColor>,
+    tx: flume::Sender<String>,
 ) -> Result<()>
-where
-DI: WriteOnlyDataCommand,
-SIZE: DisplaySize,
 {
-    let mut delay_driver = TimerDriver::new(timer, &Default::default())?;
+    // let mut delay_driver = TimerDriver::new(timer, &Default::default())?;
+
     let mut ip_info: IpInfo = IpInfo {
         ip: Ipv4Addr::new(10, 10, 10, 10),
         subnet: Subnet { gateway: Ipv4Addr::new(10, 10, 10, 1), mask: Mask(255) },
         dns: None,
         secondary_dns: None,
     };
+    // let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0)?
+    //     .into_buffered_graphics_mode();
+    // draw_shapes(&mut display);
+    // display.flush().map_err(|err| anyhow::anyhow!("{:?}", err))?;
+    // let text_style = MonoTextStyleBuilder::new()
+    //     .font(&FONT_6X12)
+    //     .text_color(BinaryColor::On)
+    //     .build();
+
     'main: loop {
         match wifi.is_up() {
             Ok(false) | Err(_) => {
@@ -270,12 +321,18 @@ SIZE: DisplaySize,
                         if info != ip_info {
                             ip_info = info;
                             println!("My Address is: {}", info.ip);
-                            if let Err(e) = display.write_text(&format!("{:?}", ip_info), Point::zero(), Baseline::Top) {
-                                error!("couldn't wire IP address: {:?}", e);
-                            }
-                            if let Err(e) = display.flush() {
+                            if let Err(e) = tx.send(ip_info.ip.to_string()) {
                                 error!("error: {:?}", e);
                             }
+                            // let _ = Text::with_baseline(info.ip.to_string().as_str(), Point::zero(), text_style, Baseline::Top)
+                            //     .draw(&mut display);
+                            // let _ = display.flush();
+                            // if let Err(e) = display.write_text(&format!("{:?}", ip_info), Point::zero(), Baseline::Top) {
+                            //     error!("couldn't wire IP address: {:?}", e);
+                            // }
+                            // if let Err(e) = display.flush() {
+                            //     error!("error: {:?}", e);
+                            // }
                         }
                     },
                     Err(e) => {
