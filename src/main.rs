@@ -5,6 +5,7 @@ use edge_executor::{LocalExecutor, Executor};
 use embedded_graphics::{geometry::Point, text::{Baseline, Text}, pixelcolor::BinaryColor, mono_font::{MonoTextStyleBuilder, ascii::FONT_6X12}, Drawable};
 use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
 
+use esp_camera_rs::Camera;
 use flume::{Selector};
 
 use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64}, prelude::I2CInterface};
@@ -30,17 +31,17 @@ use esp_idf_svc::{
 };
 use log::*;
 
+// use esp-camera-rs::Camera;
 
 mod peripherals;
 mod preludes;
 mod wifi;
 mod small_display;
-mod esp_camera;
+// mod esp_camera;
+// use crate::esp_camera::Camera;
 
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use crate::{wifi::init_wifi, peripherals::PERIPHERALS};
-use crate::esp_camera::Camera;
-
 use crate::small_display::*;
 
 

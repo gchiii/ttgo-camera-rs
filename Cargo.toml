@@ -79,6 +79,8 @@ mio = { version = "0.8.8", features = ["log"] }
 lazy_static = "1.4.0"
 parking_lot = "0.12.1"
 socket2 = "0.5.5"
+# esp-camera-rs = { git = "https://github.com/gchiii/esp-camera-rs.git" }
+esp-camera-rs = { path = "../gch-esp-camera-rs", version = "0.1.1" }
 
 [build-dependencies]
 embuild = "0.31.3"
@@ -92,7 +94,4 @@ quote = "1.0.33"
 remote_component = { name = "espressif/esp32-camera", version = "2.0.6" }
 bindings_header = "bindings.h"
 bindings_module = "camera"
-#component_dirs = "esp32-camera"
-# remote_component = { name = "espressif/esp32-camera"}
-#git = "https://github.com/espressif/esp32-camera.git"
 
