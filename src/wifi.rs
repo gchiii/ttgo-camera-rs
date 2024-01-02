@@ -4,31 +4,33 @@ use esp_idf_svc::{
     hal::peripheral,
     nvs::EspDefaultNvsPartition,
     timer::EspTaskTimerService,
-    wifi::{AsyncWifi, AuthMethod, ClientConfiguration, Configuration, EspWifi},
+    wifi::{AuthMethod, ClientConfiguration, Configuration},
 };
 
 use log::{info, warn};
-
-// fn ping(ip: ipv4::Ipv4Addr) -> Result<()> {
-//     info!("About to do some pings for {:?}", ip);
-
-//     let ping_summary = ping::EspPing::default().ping(ip, &Default::default())?;
-//     if ping_summary.transmitted != ping_summary.received {
-//         bail!("Pinging IP {} resulted in timeouts", ip);
-//     }
-
-//     info!("Pinging done");
-
-//     Ok(())
-// }
+use crate::preludes::*;
+use esp_idf_hal::delay::FreeRtos;
+use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
+use esp_idf_sys::{
+    esp_wifi_clear_ap_list, wifi_prov_event_handler_t, wifi_prov_mgr_config_t,
+    wifi_prov_mgr_deinit, wifi_prov_mgr_init, wifi_prov_mgr_is_provisioned,
+    wifi_prov_mgr_start_provisioning, wifi_prov_mgr_wait, wifi_prov_scheme_ble,
+    wifi_prov_security_WIFI_PROV_SECURITY_1,
+};
+use std::{
+    ffi::{c_void, CString},
+    ptr::null_mut,
+    thread,
+};
+use tokio::time::sleep;
 
 
 pub async fn init_wifi<'a>(
     ssid: &str,
     pass: &str,
-    modem: impl peripheral::Peripheral<P = esp_idf_svc::hal::modem::Modem> + 'a,
+    modem: impl peripheral::Peripheral<P = esp_idf_svc::hal::modem::Modem> + 'static,
     sysloop: EspSystemEventLoop,
-) -> Result<Box<EspWifi<'a>>> {
+) -> Result<Box<EspWifi<'static>>> {
     let mut esp_wifi = EspWifi::new(
         modem,
         sysloop.clone(),

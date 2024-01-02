@@ -23,8 +23,19 @@ nightly = ["esp-idf-svc/nightly"]
 experimental = ["esp-idf-svc/experimental"]
 embassy = ["esp-idf-svc/embassy-sync", "esp-idf-svc/critical-section", "esp-idf-svc/embassy-time-driver"]
 
+[patch.crates-io]
+mio = { git = "https://github.com/tokio-rs/mio", branch = "v0.8.x" }
+socket2 = { git = "https://github.com/rust-lang/socket2", branch = "master" }
+tokio = { git = "https://github.com/tokio-rs/tokio", branch = "master" }
+# esp32-nimble = { git = "https://github.com/taks/esp32-nimble" }
+
 [dependencies]
+chrono = { version = "0.4.31", default-features = false, features = [
+  "std",
+  "clock",
+] }
 log = { version = "0.4", default-features = false }
+esp-idf-sys = "0.33.7"
 esp-idf-svc = { version = "0.47.3", default-features = false, features = [
     "native",
     "std",
@@ -45,10 +56,11 @@ esp-idf-hal = { version = "0.42.5", features = [
     "embedded-io-async",
     "embedded-hal-async",
 ] }
-esp-idf-sys = "0.33.7"
-ssd1306 = "0.8.4"
 embedded-svc = { version = "0.26.4", default-features = false, features = ["std"]}
+embedded-hal = "1.0.0-rc.1"
+ssd1306 = "0.8.4"
 embedded-graphics = "0.8.1"
+display-interface = "0.4.1"
 image = { version = "0.24.7", default-features = false, features = ["bmp", "jpeg"] }
 toml-cfg = "=0.1.3"
 libc = "0.2.151"
@@ -56,13 +68,25 @@ anyhow = "1.0.75"
 edge-executor = "0.4.1"
 flume = { version = "0.11.0", default-features = false, features = ["async", "select"] }
 thiserror = "1.0.52"
-display-interface = "0.4.1"
-# embedded-hal = "1.0.0-rc.3"
-# embedded-hal-async = "1.0.0-rc.3"
+paste = "1.0.14"
+heapless = "0.8.0"
+bytes = "1.5.0"
+byteorder = "1.5.0"
+esp32-nimble = "0.4"
+tokio = { version = "*", features = ["rt", "net", "io-util", "time", "sync", "parking_lot", "socket2", "mio"]  }
+# tokio = { version = "*", features = ["rt", "net", "io-util"] }
+mio = { version = "0.8.8", features = ["log"] }
+lazy_static = "1.4.0"
+parking_lot = "0.12.1"
+socket2 = "0.5.5"
 
 [build-dependencies]
 embuild = "0.31.3"
 toml-cfg = "=0.1.3"
+prost-build = { version = "0.12.1" }
+dotenvy = "0.15.7"
+paste = "1.0.14"
+quote = "1.0.33"
 
 [[package.metadata.esp-idf-sys.extra_components]]
 remote_component = { name = "espressif/esp32-camera", version = "2.0.6" }

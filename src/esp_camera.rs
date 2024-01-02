@@ -1,6 +1,4 @@
-
 use std::marker::PhantomData;
-
 use esp_idf_hal::{
     peripheral::Peripheral,
     peripheral::PeripheralRef,

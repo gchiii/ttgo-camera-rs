@@ -30,11 +30,18 @@ use esp_idf_svc::{
 };
 use log::*;
 
+
+mod peripherals;
+mod preludes;
+mod wifi;
+mod small_display;
+mod esp_camera;
+
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use ttgo_camera::wifi::init_wifi;
-use ttgo_camera::esp_camera::Camera;
-use ttgo_camera::wifi;
-use ttgo_camera::small_display::*;
+use crate::{wifi::init_wifi, peripherals::PERIPHERALS};
+use crate::esp_camera::Camera;
+
+use crate::small_display::*;
 
 
 #[toml_cfg::toml_config]
@@ -182,10 +189,11 @@ fn main() -> Result<()> {
     let wakeup_reason = WakeupReason::get();
     info!("Last wakeup was due to {:#?}", wakeup_reason);
 
-    let executor: LocalExecutor = Default::default();
-    // let executor = Executor::new();
+    // let executor: LocalExecutor = Default::default();
+    // let executor: Executor<'static, 16> = Executor::new();
     // executor.spawn(display_runner(sd_iface, rx)).detach();
-    edge_executor::block_on(executor.run(async_main()))
+    // edge_executor::block_on(executor.run(async_main()))
+    edge_executor::block_on(async_main())
 }
 
 async fn async_main() -> Result<()> {
@@ -222,16 +230,23 @@ async fn async_main() -> Result<()> {
     let sysloop =  EspSystemEventLoop::take()?;
 
     let delay_driver = TimerDriver::new(peripherals.timer00, &Default::default())?;
+    let p = PERIPHERALS.clone();
+    let mut p = p.lock();
+    let modem = unsafe { p.modem.clone_unchecked() };
+    drop(p);
+
     let wifi: Box<EspWifi<'_>> = init_wifi(
         CONFIG.wifi_ssid,
         CONFIG.wifi_psk,
-        &mut peripherals.modem,
+        modem,
         sysloop.clone(),
     ).await?;
 
     let (tx, rx) = flume::unbounded::<String>();
-    let executor: Executor<'_, 64> = Executor::new();
-    executor.spawn(display_runner(sd_iface, rx)).detach();
+    let executor: Executor<'_, 16> = Executor::new();
+    executor.spawn(async {
+        display_runner(sd_iface, rx).await
+    }).detach();
 
     let camera_mutex = Arc::new(Mutex::new(camera));
 
@@ -242,47 +257,30 @@ async fn async_main() -> Result<()> {
             return Err(e);
         },
     };
-
+    tx.send_async("banana".to_string()).await?;
     // let _pir = PinDriver::input(peripherals.pins.gpio33);
 
+    // let run = executor.run(main_loop(delay_driver, wifi, sysloop, tx));
     let main_loop = main_loop(delay_driver, wifi, sysloop, tx).await;
     drop(_httpd);
     main_loop
+    // Ok(())
 }
 
 
-// async fn main_loop<DI, SIZE>(
-//     timer: impl Peripheral<P = impl Timer>,
-//     mut wifi: Box<EspWifi<'_>>,
-//     sysloop: EspSystemEventLoop,
-//     mut display: SmallDisplay<'_, DI, SIZE, BufferedGraphicsMode<SIZE>, BinaryColor>,
-// ) -> Result<()>
-// where
-// DI: WriteOnlyDataCommand,
-// SIZE: DisplaySize,
 async fn main_loop<'d>(
-    mut delay_driver: TimerDriver<'_>,
+    mut delay_driver: TimerDriver<'d>,
     mut wifi: Box<EspWifi<'d>>,
     sysloop: EspSystemEventLoop,
     tx: flume::Sender<String>,
 ) -> Result<()>
 {
-    // let mut delay_driver = TimerDriver::new(timer, &Default::default())?;
-
     let mut ip_info: IpInfo = IpInfo {
         ip: Ipv4Addr::new(10, 10, 10, 10),
         subnet: Subnet { gateway: Ipv4Addr::new(10, 10, 10, 1), mask: Mask(255) },
         dns: None,
         secondary_dns: None,
     };
-    // let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0)?
-    //     .into_buffered_graphics_mode();
-    // draw_shapes(&mut display);
-    // display.flush().map_err(|err| anyhow::anyhow!("{:?}", err))?;
-    // let text_style = MonoTextStyleBuilder::new()
-    //     .font(&FONT_6X12)
-    //     .text_color(BinaryColor::On)
-    //     .build();
 
     'main: loop {
         match wifi.is_up() {
@@ -338,7 +336,6 @@ async fn main_loop<'d>(
 
             },
         }
-
         delay_driver.delay(1000).await?;
     }
 
