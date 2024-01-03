@@ -69,12 +69,12 @@ edge-executor = "0.4.1"
 flume = { version = "0.11.0", default-features = false, features = ["async", "select"] }
 thiserror = "1.0.52"
 paste = "1.0.14"
+hex = "0.4.3"
 heapless = "0.8.0"
 bytes = "1.5.0"
 byteorder = "1.5.0"
 esp32-nimble = "0.4"
 tokio = { version = "*", features = ["rt", "net", "io-util", "time", "sync", "parking_lot", "socket2", "mio"]  }
-# tokio = { version = "*", features = ["rt", "net", "io-util"] }
 mio = { version = "0.8.8", features = ["log"] }
 lazy_static = "1.4.0"
 parking_lot = "0.12.1"

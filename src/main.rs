@@ -13,7 +13,7 @@ use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64}, prelude::I2C
 
 use std::{
     time::{Instant, Duration},
-    sync::{Arc, Mutex}, net::Ipv4Addr, future::Future,
+    sync::{Arc, Mutex}, net::Ipv4Addr,
 };
 
 
@@ -25,7 +25,7 @@ use esp_idf_svc::{
         timer::{TimerDriver}
     },
     io::Write,
-    eventloop::{EspSystemEventLoop, EspEventLoop, System},
+    eventloop::{EspSystemEventLoop},
     wifi::EspWifi,
     http::server::EspHttpServer,
 };
@@ -33,15 +33,25 @@ use log::*;
 
 // use esp-camera-rs::Camera;
 
+// mod app;
+// mod ble;
+// mod build_env;
+// mod crypto;
+// mod http;
+// mod key_inspect;
+// mod mqtt;
+mod ntp;
 mod peripherals;
 mod preludes;
+// mod proto;
 mod wifi;
+
 mod small_display;
 // mod esp_camera;
 // use crate::esp_camera::Camera;
 
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use crate::{wifi::init_wifi, peripherals::PERIPHERALS};
+use crate::{wifi::init_wifi, peripherals::{create_timer_driver_00, take_i2c, SYS_LOOP, PERIPHERALS}};
 use crate::small_display::*;
 
 
@@ -190,64 +200,67 @@ fn main() -> Result<()> {
     let wakeup_reason = WakeupReason::get();
     info!("Last wakeup was due to {:#?}", wakeup_reason);
 
-    // let executor: LocalExecutor = Default::default();
+    let executor: LocalExecutor = Default::default();
     // let executor: Executor<'static, 16> = Executor::new();
     // executor.spawn(display_runner(sd_iface, rx)).detach();
-    // edge_executor::block_on(executor.run(async_main()))
-    edge_executor::block_on(async_main())
+    edge_executor::block_on(executor.run(async_main()))
+    // edge_executor::block_on(async_main())
 }
 
 async fn async_main() -> Result<()> {
     info!("starting async_main");
-    let mut peripherals = Peripherals::take()?;
 
-    let i2c = peripherals.i2c0;
-    let sda = peripherals.pins.gpio21;
-    let scl = peripherals.pins.gpio22;
-    let sd_iface = bld_interface(i2c, sda, scl)?;
+    let i2c = take_i2c();
+    let sd_iface = bld_interface(i2c)?;
 
-    let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
-    let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
-    let cam_pwdn = (&mut peripherals.pins.gpio26).into_ref().map_into();
-    let camera = Camera::new(
-        Some(cam_pwdn),
-        None,
-        &mut peripherals.pins.gpio4,
-        &mut peripherals.pins.gpio34,
-        &mut peripherals.pins.gpio13,
-        &mut peripherals.pins.gpio14,
-        &mut peripherals.pins.gpio35,
-        &mut peripherals.pins.gpio39,
-        &mut peripherals.pins.gpio12,
-        &mut peripherals.pins.gpio15,
-        &mut peripherals.pins.gpio36,
-        &mut peripherals.pins.gpio5,
-        &mut peripherals.pins.gpio27,
-        &mut peripherals.pins.gpio25,
-        Some(cam_sda),
-        Some(cam_scl),
-    )?;
-
-    let sysloop =  EspSystemEventLoop::take()?;
-
-    let delay_driver = TimerDriver::new(peripherals.timer00, &Default::default())?;
     let p = PERIPHERALS.clone();
     let mut p = p.lock();
-    let modem = unsafe { p.modem.clone_unchecked() };
+    let cam_sda = unsafe { &mut p.pins.gpio18.clone_unchecked()};
+    let cam_scl = unsafe { &mut p.pins.gpio23.clone_unchecked()};
+    let cam_pwdn = unsafe { &mut p.pins.gpio26.clone_unchecked()};
+    let pin_xclk = unsafe { &mut p.pins.gpio4.clone_unchecked()};
+    let pin_d0 = unsafe { &mut p.pins.gpio34.clone_unchecked()};
+    let pin_d1 = unsafe { &mut p.pins.gpio13.clone_unchecked()};
+    let pin_d2 = unsafe { &mut p.pins.gpio14.clone_unchecked()};
+    let pin_d3 = unsafe { &mut p.pins.gpio35.clone_unchecked()};
+    let pin_d4 = unsafe { &mut p.pins.gpio39.clone_unchecked()};
+    let pin_d5 = unsafe { &mut p.pins.gpio12.clone_unchecked()};
+    let pin_d6 = unsafe { &mut p.pins.gpio15.clone_unchecked()};
+    let pin_d7 = unsafe { &mut p.pins.gpio36.clone_unchecked()};
+    let pin_vsync = unsafe { &mut p.pins.gpio5.clone_unchecked()};
+    let pin_href = unsafe { &mut p.pins.gpio27.clone_unchecked()};
+    let pin_pclk = unsafe { &mut p.pins.gpio25.clone_unchecked()};
     drop(p);
+
+    let camera = Camera::new(
+        Some(cam_pwdn.into_ref().map_into()),
+        None,
+        pin_xclk,
+        pin_d0,
+        pin_d1,
+        pin_d2,
+        pin_d3,
+        pin_d4,
+        pin_d5,
+        pin_d6,
+        pin_d7,
+        pin_vsync,
+        pin_href,
+        pin_pclk,
+        Some(cam_sda.into_ref().map_into()),
+        Some(cam_scl.into_ref().map_into()),
+    )?;
+
+    let delay_driver = create_timer_driver_00();
 
     let wifi: Box<EspWifi<'_>> = init_wifi(
         CONFIG.wifi_ssid,
         CONFIG.wifi_psk,
-        modem,
-        sysloop.clone(),
     ).await?;
 
     let (tx, rx) = flume::unbounded::<String>();
     let executor: Executor<'_, 16> = Executor::new();
-    executor.spawn(async {
-        display_runner(sd_iface, rx).await
-    }).detach();
+    executor.spawn( display_runner(sd_iface, rx) ).detach();
 
     let camera_mutex = Arc::new(Mutex::new(camera));
 
@@ -262,7 +275,7 @@ async fn async_main() -> Result<()> {
     // let _pir = PinDriver::input(peripherals.pins.gpio33);
 
     // let run = executor.run(main_loop(delay_driver, wifi, sysloop, tx));
-    let main_loop = main_loop(delay_driver, wifi, sysloop, tx).await;
+    let main_loop = main_loop(delay_driver, wifi, tx).await;
     drop(_httpd);
     main_loop
     // Ok(())
@@ -272,7 +285,6 @@ async fn async_main() -> Result<()> {
 async fn main_loop<'d>(
     mut delay_driver: TimerDriver<'d>,
     mut wifi: Box<EspWifi<'d>>,
-    sysloop: EspSystemEventLoop,
     tx: flume::Sender<String>,
 ) -> Result<()>
 {
@@ -292,7 +304,7 @@ async fn main_loop<'d>(
                     if wifi::connect(
                         CONFIG.wifi_ssid,
                         CONFIG.wifi_psk,
-                        sysloop.clone(),
+                        SYS_LOOP.clone(),
                         &mut wifi,
                     )
                     .await

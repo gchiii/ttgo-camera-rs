@@ -35,13 +35,7 @@ pub enum SmallDisplayError {
 
 type Sdi<'d> = I2CInterface<I2cDriver<'d>>;
 
-pub fn bld_interface<'d>(
-    i2c: impl Peripheral<P = impl I2c> + 'd,
-    sda: impl Peripheral<P = impl InputPin + esp_idf_hal::gpio::OutputPin> + 'd,
-    scl: impl Peripheral<P = impl InputPin + OutputPin> + 'd,
-) -> Result<Sdi<'d>, SmallDisplayError> {
-    let config: esp_idf_hal::i2c::config::Config = I2cConfig::new().baudrate(400.kHz().into());
-    let i2c: I2cDriver<'d> = I2cDriver::<'d>::new(i2c, sda, scl, &config)?;
+pub fn bld_interface<'d>(i2c: I2cDriver<'d>) -> Result<Sdi<'d>, SmallDisplayError> {
     Ok(I2CDisplayInterface::new(i2c))
 }
 

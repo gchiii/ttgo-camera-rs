@@ -4,7 +4,7 @@ use esp_idf_hal::i2c::{config::Config as I2cConfig, I2cDriver};
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::peripherals::Peripherals;
 use esp_idf_hal::timer::{TimerConfig, TimerDriver};
-use esp_idf_hal::uart::{AsyncUartRxDriver, UartConfig, UartRxDriver};
+
 use esp_idf_hal::units::*;
 // use esp_idf_hal::units::KiloHertz;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
