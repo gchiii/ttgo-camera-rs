@@ -1,13 +1,15 @@
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Result, anyhow};
 
-use edge_executor::{LocalExecutor, Executor};
+use tokio::runtime;
+// use edge_executor::{LocalExecutor, Executor};
 use embedded_graphics::{geometry::Point, text::{Baseline, Text}, pixelcolor::BinaryColor, mono_font::{MonoTextStyleBuilder, ascii::FONT_6X12}, Drawable};
 use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
 
 use esp_camera_rs::Camera;
-use flume::{Selector};
 
+use esp_idf_sys::EspError;
+use futures::FutureExt;
 use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64}, prelude::I2CInterface};
 
 
@@ -26,7 +28,7 @@ use esp_idf_svc::{
     },
     io::Write,
     eventloop::{EspSystemEventLoop},
-    wifi::EspWifi,
+    wifi::{EspWifi, AsyncWifi},
     http::server::EspHttpServer,
 };
 use log::*;
@@ -51,7 +53,7 @@ mod small_display;
 // use crate::esp_camera::Camera;
 
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use crate::{wifi::init_wifi, peripherals::{create_timer_driver_00, take_i2c, SYS_LOOP, PERIPHERALS}};
+use crate::{wifi::app_wifi_loop, peripherals::{create_timer_driver_00, take_i2c, SYS_LOOP, PERIPHERALS, ESP_TASK_TIMER_SVR, create_esp_wifi}};
 use crate::small_display::*;
 
 
@@ -154,7 +156,7 @@ fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
     Ok(server)
 }
 
-async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::Receiver<String>) {
+async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::Receiver<String>) -> Result<()> {
     println!("started display_runner!!!!!!!");
     let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
         .into_buffered_graphics_mode();
@@ -168,7 +170,7 @@ async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::R
         .build();
 
     loop {
-        Selector::new()
+        let _ = flume::Selector::new()
             .recv(&rx, |thing| {
                 match thing {
                     Ok(text) => {
@@ -178,11 +180,14 @@ async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::R
                     },
                     Err(e) => {
                         error!("error: {:?}", e);
+                        return Err(anyhow!("display: {}", e));
                     },
-                }
+                };
+                Ok(())
             })
             .wait();
     }
+    // Ok(())
 }
 
 
@@ -200,19 +205,19 @@ fn main() -> Result<()> {
     let wakeup_reason = WakeupReason::get();
     info!("Last wakeup was due to {:#?}", wakeup_reason);
 
-    let executor: LocalExecutor = Default::default();
+    // let executor: LocalExecutor = Default::default();
     // let executor: Executor<'static, 16> = Executor::new();
-    // executor.spawn(display_runner(sd_iface, rx)).detach();
-    edge_executor::block_on(executor.run(async_main()))
-    // edge_executor::block_on(async_main())
-}
-
-async fn async_main() -> Result<()> {
-    info!("starting async_main");
 
     let i2c = take_i2c();
     let sd_iface = bld_interface(i2c)?;
+    let (tx, rx) = flume::unbounded::<String>();
+    // executor.spawn( display_runner(sd_iface, rx) ).detach();
 
+    let mut wifi: EspWifi<'static> = create_esp_wifi();
+    let mywifi: AsyncWifi<EspWifi<'static>> = AsyncWifi::wrap(wifi, SYS_LOOP.clone(), ESP_TASK_TIMER_SVR.clone()).unwrap();
+    // let wifi_task = executor.spawn(app_wifi_loop(mywifi, tx.clone()));
+    // let wifi_task = thread .spawn(app_wifi_loop(mywifi, tx.clone()));
+    // kickoff_camera_service();
     let p = PERIPHERALS.clone();
     let mut p = p.lock();
     let cam_sda = unsafe { &mut p.pins.gpio18.clone_unchecked()};
@@ -250,108 +255,51 @@ async fn async_main() -> Result<()> {
         Some(cam_sda.into_ref().map_into()),
         Some(cam_scl.into_ref().map_into()),
     )?;
-
-    let delay_driver = create_timer_driver_00();
-
-    let wifi: Box<EspWifi<'_>> = init_wifi(
-        CONFIG.wifi_ssid,
-        CONFIG.wifi_psk,
-    ).await?;
-
-    let (tx, rx) = flume::unbounded::<String>();
-    let executor: Executor<'_, 16> = Executor::new();
-    executor.spawn( display_runner(sd_iface, rx) ).detach();
-
     let camera_mutex = Arc::new(Mutex::new(camera));
-
-    let _httpd = match init_http(camera_mutex) {
-        Ok(h) => h,
-        Err(e) => {
-            error!("something happenned: {:?}", e);
+    let blah = async move {
+        Ok(if let Err(e) = init_http(camera_mutex) {
+            error!("init_http: {}", e);
             return Err(e);
+        })
+    };
+
+    let the_thing = match tokio::runtime::Builder::new_current_thread()
+        .max_blocking_threads(16)
+        .enable_time()
+        .build()
+        {
+        Ok(a_thing) => a_thing,
+        Err(e) => {
+            error!("tokio: {}", e);
+            return Err(e.into());
         },
     };
-    tx.send_async("banana".to_string()).await?;
-    // let _pir = PinDriver::input(peripherals.pins.gpio33);
-
-    // let run = executor.run(main_loop(delay_driver, wifi, sysloop, tx));
-    let main_loop = main_loop(delay_driver, wifi, tx).await;
-    drop(_httpd);
-    main_loop
-    // Ok(())
-}
-
-
-async fn main_loop<'d>(
-    mut delay_driver: TimerDriver<'d>,
-    mut wifi: Box<EspWifi<'d>>,
-    tx: flume::Sender<String>,
-) -> Result<()>
-{
-    let mut ip_info: IpInfo = IpInfo {
-        ip: Ipv4Addr::new(10, 10, 10, 10),
-        subnet: Subnet { gateway: Ipv4Addr::new(10, 10, 10, 1), mask: Mask(255) },
-        dns: None,
-        secondary_dns: None,
-    };
-
-    'main: loop {
-        match wifi.is_up() {
-            Ok(false) | Err(_) => {
-                warn!("WiFi died, attempting to reconnect...");
-                let mut counter = 0;
-                loop {
-                    if wifi::connect(
-                        CONFIG.wifi_ssid,
-                        CONFIG.wifi_psk,
-                        SYS_LOOP.clone(),
-                        &mut wifi,
-                    )
-                    .await
-                    .is_ok()
-                    {
-                        info!("WiFi reconnected successfully.");
-                        break;
-                    }
-                    counter += 1;
-                    warn!("Failed to connect to wifi, attempt {}", counter);
-
-                    // If we fail to connect for long enough, reset the damn processor
-                    if counter > 10 {
-                        break 'main;
+    the_thing
+        .block_on(async move {
+            futures::select! {
+                ret = display_runner(sd_iface, rx).fuse() => {
+                    if let Err(e) = ret {
+                        error!("display: {}", e)
                     }
                 }
-            },
-            Ok(true) => {
-                match wifi.sta_netif().get_ip_info() {
-                    Ok(info) => {
-                        if info != ip_info {
-                            ip_info = info;
-                            println!("My Address is: {}", info.ip);
-                            if let Err(e) = tx.send(ip_info.ip.to_string()) {
-                                error!("error: {:?}", e);
-                            }
-                            // let _ = Text::with_baseline(info.ip.to_string().as_str(), Point::zero(), text_style, Baseline::Top)
-                            //     .draw(&mut display);
-                            // let _ = display.flush();
-                            // if let Err(e) = display.write_text(&format!("{:?}", ip_info), Point::zero(), Baseline::Top) {
-                            //     error!("couldn't wire IP address: {:?}", e);
-                            // }
-                            // if let Err(e) = display.flush() {
-                            //     error!("error: {:?}", e);
-                            // }
-                        }
-                    },
-                    Err(e) => {
-                        error!("couldn't get ip address: {:?}", e);
-                    },
+                ret = app_wifi_loop(mywifi, tx.clone()).fuse() => {
+                    if let Err(e) = ret {
+                        error!("wifi: {}", e)
+                    }
                 }
-
-            },
-        }
-        delay_driver.delay(1000).await?;
-    }
-
-    bail!("Something went horribly wrong!!!")
+                // ret = blah.fuse() => {
+                //     if let Err(e) = ret {
+                //         error!("wifi: {}", e)
+                //     }
+                // }
+            }
+        });
+    Ok(())
+    // executor.spawn(display_runner(sd_iface, rx)).detach();
+    // let main_task = executor.spawn(async_main(tx));
+    // edge_executor::block_on(main_task)
+    // edge_executor::block_on(executor.run(async_main(tx)))
+    // edge_executor::block_on(async_main())
 }
+
 

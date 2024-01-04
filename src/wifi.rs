@@ -1,9 +1,11 @@
 use anyhow::Result;
+use embedded_svc::wifi::AccessPointInfo;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     timer::EspTaskTimerService,
     wifi::{AuthMethod, ClientConfiguration, Configuration},
 };
+use flume::Sender;
 use crate::{ntp::ntp_sync, peripherals::{create_esp_wifi, SYS_LOOP}};
 use crate::peripherals::{take_gpio12_output, take_gpio13_output};
 
@@ -25,95 +27,96 @@ use std::{
 use tokio::time::sleep;
 
 
-pub async fn init_wifi<'a>(
-    ssid: &str,
-    pass: &str,
-) -> Result<Box<EspWifi<'static>>> {
-    let mut esp_wifi = create_esp_wifi();
+// pub async fn init_wifi<'a>(
+//     ssid: &str,
+//     pass: &str,
+//     esp_wifi: &'a mut AsyncWifi<EspWifi<'static>>,
+// ) -> Result<AsyncWifi<EspWifi<'static>>> {
+//     // let mut esp_wifi = create_esp_wifi();
 
-    let mut counter = 0;
+//     let mut counter = 0;
 
-    loop {
-        if connect(ssid, pass, SYS_LOOP.clone(), &mut esp_wifi)
-            .await
-            .is_ok()
-        {
-            break;
-        }
-        counter += 1;
-        warn!("Failed to connect to wifi, try {}", counter);
-    }
+//     loop {
+//         if connect(ssid, pass, SYS_LOOP.clone(), &mut esp_wifi)
+//             .await
+//             .is_ok()
+//         {
+//             break;
+//         }
+//         counter += 1;
+//         warn!("Failed to connect to wifi, try {}", counter);
+//     }
 
-    Ok(Box::new(esp_wifi))
-}
+//     Ok(Box::new(esp_wifi))
+// }
 
-pub async fn connect(
-    ssid: &str,
-    pass: &str,
-    sysloop: EspSystemEventLoop,
-    esp_wifi: &mut EspWifi<'_>,
-) -> Result<()> {
-    if ssid.is_empty() {
-        panic!("Missing WiFi name")
-    }
+// pub async fn connect(
+//     ssid: &str,
+//     pass: &str,
+//     sysloop: EspSystemEventLoop,
+//     esp_wifi: &mut EspWifi<'_>,
+// ) -> Result<()> {
+//     if ssid.is_empty() {
+//         panic!("Missing WiFi name")
+//     }
 
-    let auth_method = if pass.is_empty() {
-        info!("Wifi password is empty");
-        AuthMethod::None
-    } else {
-        AuthMethod::WPA2Personal
-    };
+//     let auth_method = if pass.is_empty() {
+//         info!("Wifi password is empty");
+//         AuthMethod::None
+//     } else {
+//         AuthMethod::WPA2Personal
+//     };
 
-    let mut wifi = AsyncWifi::wrap(esp_wifi, sysloop, EspTaskTimerService::new()?)?;
+//     let mut wifi = AsyncWifi::wrap(esp_wifi, sysloop, EspTaskTimerService::new()?)?;
 
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
+//     wifi.set_configuration(&Configuration::Client(ClientConfiguration::default()))?;
 
-    info!("Starting wifi...");
+//     info!("Starting wifi...");
 
-    wifi.start().await?;
+//     wifi.start().await?;
 
-    info!("Scanning...");
+//     info!("Scanning...");
 
-    let mut ap_infos = wifi.scan().await?.into_iter();
+//     let mut ap_infos = wifi.scan().await?.into_iter();
 
-    let ours = ap_infos.find(|a| a.ssid == ssid);
+//     let ours = ap_infos.find(|a| a.ssid == ssid);
 
-    let channel = if let Some(ours) = ours {
-        info!(
-            "Found configured access point {} on channel {}",
-            ssid, ours.channel
-        );
-        Some(ours.channel)
-    } else {
-        info!(
-            "Configured access point {} not found during scanning, will go with unknown channel",
-            ssid
-        );
-        None
-    };
+//     let channel = if let Some(ours) = ours {
+//         info!(
+//             "Found configured access point {} on channel {}",
+//             ssid, ours.channel
+//         );
+//         Some(ours.channel)
+//     } else {
+//         info!(
+//             "Configured access point {} not found during scanning, will go with unknown channel",
+//             ssid
+//         );
+//         None
+//     };
 
-    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
-        ssid: ssid.into(),
-        password: pass.into(),
-        channel,
-        auth_method,
-        ..Default::default()
-    }))?;
+//     wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+//         ssid: ssid.into(),
+//         password: pass.into(),
+//         channel,
+//         auth_method,
+//         ..Default::default()
+//     }))?;
 
-    info!("Connecting wifi...");
+//     info!("Connecting wifi...");
 
-    wifi.connect().await?;
+//     wifi.connect().await?;
 
-    info!("Waiting for DHCP lease...");
+//     info!("Waiting for DHCP lease...");
 
-    wifi.wait_netif_up().await?;
+//     wifi.wait_netif_up().await?;
 
-    let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
+//     let ip_info = wifi.wifi().sta_netif().get_ip_info()?;
 
-    info!("Wifi DHCP info: {:?}", ip_info);
+//     info!("Wifi DHCP info: {:?}", ip_info);
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 
 fn prov_led_blink() -> Result<()> {
@@ -181,21 +184,34 @@ pub fn prov_check() -> Result<bool> {
     }
 }
 
-pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>) -> Result<MacList> {
+pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>) -> Result<AccessPointInfo> {
     wifi.start().await?;
 
-    let scan_result = wifi_scan(wifi).await?;
+    // let scan_result = wifi_scan(wifi).await?;
+    match wifi_scan(wifi).await {
+        Ok(ap) => {
+            info!("Found configured access point {} on channel {}", ap.ssid, ap.channel);
+            wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+                ssid: CONFIG.wifi_ssid.into(),
+                password: CONFIG.wifi_psk.into(),
+                channel: Some(ap.channel),
+                auth_method: ap.auth_method,
+                ..Default::default()
+            }))?;
+            wifi.connect().await?;
+            wifi.wait_netif_up().await?;
 
-    wifi.connect().await?;
-    wifi.wait_netif_up().await?;
+            info!("Connected to Wi-fi, now trying setting time from ntp.");
+            ntp_sync()?;
 
-    info!("Connected to Wi-fi, now trying setting time from ntp.");
-    ntp_sync()?;
+            Ok(ap)
 
-    Ok(scan_result)
+        },
+        Err(e) => Err(e),
+    }
 }
 
-pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>) -> Result<()> {
+pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>, tx: Sender<String>) -> Result<()> {
     let mut count = 0u8;
     let mut fail_count = 0u8;
 
@@ -231,15 +247,27 @@ pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>) -> Result<()> 
     }
 }
 
-pub async fn wifi_scan<'a>(wifi: &'a mut AsyncWifi<EspWifi<'static>>) -> Result<MacList> {
+#[toml_cfg::toml_config]
+pub struct Config {
+    #[default("")]
+    wifi_ssid: &'static str,
+    #[default("")]
+    wifi_psk: &'static str,
+}
+
+
+pub async fn wifi_scan<'a>(wifi: &'a mut AsyncWifi<EspWifi<'static>>) -> Result<AccessPointInfo> {
     esp!(unsafe { esp_wifi_clear_ap_list() })?;
-    let (scan, _) = wifi.scan_n::<32>().await?;
-    let mut ret: HeaplessVec<_, 32> = HeaplessVec::new();
-    for ap in scan.into_iter() {
-        ret.push(ap.bssid).expect("buf.push");
+    let ssid = CONFIG.wifi_ssid;
+
+    if let Ok((scan, _)) = wifi.scan_n::<32>().await {
+        for ap in scan.into_iter() {
+            if ap.ssid == ssid {
+                return Ok(ap);
+            }
+        }
     }
-    info!("wifi_scan: {:?}", ret);
-    Ok(ret)
+    Err(anyhow!("couldn't find ssid"))
 }
 
 pub type MacList = HeaplessVec<[u8; 6], 32>;

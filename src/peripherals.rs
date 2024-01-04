@@ -83,47 +83,47 @@ macro_rules! define_gpio_output {
     };
 }
 
-define_gpio_input!(0);
-define_gpio_input!(1);
-define_gpio_input!(2);
-define_gpio_input!(3);
-define_gpio_input!(4);
-define_gpio_input!(5);
-define_gpio_input!(6);
-define_gpio_input!(7);
-define_gpio_input!(8);
-define_gpio_input!(9); // Button
-define_gpio_input!(10);
-define_gpio_input!(11);
-define_gpio_input!(12);
-define_gpio_input!(13);
-define_gpio_input!(14);
-define_gpio_input!(15);
-define_gpio_input!(16);
-define_gpio_input!(17);
-define_gpio_input!(18);
-define_gpio_input!(19);
+// define_gpio_input!(0);
+// define_gpio_input!(1);
+// define_gpio_input!(2);
+// define_gpio_input!(3);
+// define_gpio_input!(4);
+// define_gpio_input!(5);
+// define_gpio_input!(6);
+// define_gpio_input!(7);
+// define_gpio_input!(8);
+// define_gpio_input!(9); // Button
+// define_gpio_input!(10);
+// define_gpio_input!(11);
+// define_gpio_input!(12);
+// define_gpio_input!(13);
+// define_gpio_input!(14);
+// define_gpio_input!(15);
+// define_gpio_input!(16);
+// define_gpio_input!(17);
+// define_gpio_input!(18);
+// define_gpio_input!(19);
 
-define_gpio_output!(0);
-define_gpio_output!(1);
-define_gpio_output!(2);
-define_gpio_output!(3);
-define_gpio_output!(4);
-define_gpio_output!(5);
-define_gpio_output!(6);
-define_gpio_output!(7);
-define_gpio_output!(8);
-define_gpio_output!(9);
-define_gpio_output!(10);
-define_gpio_output!(11);
+// define_gpio_output!(0);
+// define_gpio_output!(1);
+// define_gpio_output!(2);
+// define_gpio_output!(3);
+// define_gpio_output!(4);
+// define_gpio_output!(5);
+// define_gpio_output!(6);
+// define_gpio_output!(7);
+// define_gpio_output!(8);
+// define_gpio_output!(9);
+// define_gpio_output!(10);
+// define_gpio_output!(11);
 define_gpio_output!(12); // LED1
 define_gpio_output!(13); // LED2
-define_gpio_output!(14);
-define_gpio_output!(15);
-define_gpio_output!(16);
-define_gpio_output!(17);
-define_gpio_output!(18);
-define_gpio_output!(19);
+// define_gpio_output!(14);
+// define_gpio_output!(15);
+// define_gpio_output!(16);
+// define_gpio_output!(17);
+// define_gpio_output!(18);
+// define_gpio_output!(19);
 
 
 pub fn take_i2c() -> I2cDriver<'static> {
