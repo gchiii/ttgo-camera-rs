@@ -1,14 +1,14 @@
 
-use anyhow::{bail, Result, anyhow};
+use anyhow::{Result, anyhow};
 
-use edge_executor::{LocalExecutor, Executor};
-use embassy_futures::yield_now;
+use edge_executor::{Executor};
+
 use embedded_graphics::{geometry::Point, text::{Baseline, Text}, pixelcolor::BinaryColor, mono_font::{MonoTextStyleBuilder, ascii::FONT_6X12}, Drawable};
-use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
+
 
 use esp_camera_rs::Camera;
 
-use esp_idf_sys::EspError;
+
 use flume::Sender;
 use futures::FutureExt;
 use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64}, prelude::I2CInterface, mode::DisplayConfig};
@@ -16,19 +16,16 @@ use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64}, prelude::I2C
 
 use std::{
     time::{Instant, Duration},
-    sync::{Arc, Mutex}, net::Ipv4Addr,
+    sync::{Arc, Mutex},
 };
 
 
 use esp_idf_hal::{reset::{ResetReason, WakeupReason}, i2c::{I2cDriver}};
 use esp_idf_svc::{
     hal::{
-        peripherals::Peripherals,
-        peripheral::Peripheral,
-        timer::{TimerDriver}
+        peripheral::Peripheral
     },
     io::Write,
-    eventloop::{EspSystemEventLoop},
     wifi::{EspWifi, AsyncWifi},
     http::server::EspHttpServer,
 };
@@ -54,7 +51,7 @@ mod small_display;
 // use crate::esp_camera::Camera;
 
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use crate::{wifi::{app_wifi_loop, initial_wifi_connect}, peripherals::{create_timer_driver_00, take_i2c, SYS_LOOP, PERIPHERALS, ESP_TASK_TIMER_SVR, create_esp_wifi}};
+use crate::{wifi::{app_wifi_loop, initial_wifi_connect}, peripherals::{take_i2c, SYS_LOOP, PERIPHERALS, ESP_TASK_TIMER_SVR, create_esp_wifi}};
 use crate::small_display::*;
 
 
@@ -217,7 +214,7 @@ fn main() -> Result<()> {
     let sd_iface = bld_interface(i2c)?;
     let (tx, rx) = flume::unbounded::<String>();
 
-    let mut wifi: EspWifi<'static> = create_esp_wifi();
+    let wifi: EspWifi<'static> = create_esp_wifi();
     let mut mywifi: AsyncWifi<EspWifi<'static>> = AsyncWifi::wrap(wifi, SYS_LOOP.clone(), ESP_TASK_TIMER_SVR.clone()).unwrap();
 
     let p = PERIPHERALS.clone();
