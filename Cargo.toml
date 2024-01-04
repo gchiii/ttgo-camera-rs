@@ -89,14 +89,24 @@ bytes = "1.5.0"
 byteorder = "1.5.0"
 # esp32-nimble = "0.4"
 # tokio = { version = "*", features = ["rt", "net", "io-util", "time", "sync", "parking_lot", "socket2", "mio"]  }
-tokio = { version = "*", features = ["rt", "net", "io-util", "time"]  }
-mio = { version = "0.8.8", features = ["log"] }
+# tokio = { version = "*", features = ["rt", "net", "io-util", "time"]  }
+# mio = { version = "0.8.8", features = ["log"] }
 lazy_static = "1.4.0"
 parking_lot = "0.12.1"
 paste = "1.0.14"
-socket2 = "0.5.5"
+# socket2 = "0.5.5"
 # my stuff here
-# edge-executor = "0.4.1"
+edge-executor = { version = "0.4.1", default-features = false, features = [
+  "critical-section",
+  "heapless",
+  "portable-atomic",
+  "portable-atomic-util",
+  "std",
+] }
+embassy-futures = { version = "0.1" }
+embassy-sync = { version = "0.5.0", features = ["std"] }
+# embassy-time = { version = "0.2.0" }
+
 flume = { version = "0.11.0", default-features = false, features = ["async", "select"] }
 thiserror = "1.0.52"
 ssd1306 = "0.8.4"
@@ -123,6 +133,12 @@ quote = "1.0.33"
 
 [patch.crates-io]
 # esp32-nimble = { git = "https://github.com/taks/esp32-nimble" }
-mio = { git = "https://github.com/tokio-rs/mio", branch = "v0.8.x" }
-socket2 = { git = "https://github.com/rust-lang/socket2", branch = "master" }
-tokio = { git = "https://github.com/tokio-rs/tokio", branch = "master" }
+# mio = { git = "https://github.com/tokio-rs/mio", branch = "v0.8.x" }
+# socket2 = { git = "https://github.com/rust-lang/socket2", branch = "master" }
+# tokio = { git = "https://github.com/tokio-rs/tokio", branch = "master" }
+# esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys" }
+# esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal" }
+esp-idf-svc = { path = "../esp-idf-svc" }
+# esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc", rev = "3ebaf6337dc00d8a4fa9a4f02640508c22a0faac" }
+# embedded-svc = { git = "https://github.com/esp-rs/embedded-svc", rev = "26731acf99430dd25914208aae81120c01dd5500" }
+embedded-svc = { git = "https://github.com/esp-rs/embedded-svc" }

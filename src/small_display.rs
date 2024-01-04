@@ -35,7 +35,7 @@ pub enum SmallDisplayError {
 
 type Sdi<'d> = I2CInterface<I2cDriver<'d>>;
 
-pub fn bld_interface<'d>(i2c: I2cDriver<'d>) -> Result<Sdi<'d>, SmallDisplayError> {
+pub fn bld_interface(i2c: I2cDriver<'_>) -> Result<Sdi<'_>, SmallDisplayError> {
     Ok(I2CDisplayInterface::new(i2c))
 }
 
