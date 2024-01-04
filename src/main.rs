@@ -126,14 +126,6 @@ fn init_http(cam: Arc<Mutex<Camera>>, tx: Sender<String>) -> Result<EspHttpServe
             }
         };
         info!("got the framebuffer");
-        // let jpeg = match fb.data_as_jpeg(20) {
-        //     Ok(jpeg) => jpeg,
-        //     Err(e) => {
-        //         let mut response = request.into_status_response(500)?;
-        //         let _ = writeln!(response, "init_http: Error: {:#?}", e);
-        //         return Ok(());
-        //     }
-        // };
         let jpeg = fb.data();
         info!("Took {}ms to capture_jpeg", time.elapsed().as_millis());
 
@@ -162,7 +154,7 @@ async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::R
     let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
         .into_buffered_graphics_mode();
     let _ = display.init();
-    draw_shapes(&mut display);
+    // draw_shapes(&mut display);
     if let Err(e) = display.flush() {
         error!("error: {:?}", e);
     }
@@ -171,6 +163,7 @@ async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::R
         .text_color(BinaryColor::On)
         .build();
 
+    let mut text_point = Point::zero();
     warn!("blah");
     loop {
         let _ = flume::Selector::new()
@@ -178,7 +171,12 @@ async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::R
                 match thing {
                     Ok(text) => {
                         warn!("disp: {}", text);
-                        if let Err(e) = Text::with_baseline(text.as_str(), Point::zero(), text_style, Baseline::Top).draw(&mut display) {
+                        let d_text = Text::with_baseline(text.as_str(), text_point, text_style, Baseline::Top);
+                        match d_text.draw(&mut display) {
+                            Ok(p) => text_point.y += text_style.font.character_size.height as i32,
+                            Err(e) => error!("error: {:?}", e),
+                        }
+                        if let Err(e) = display.flush() {
                             error!("error: {:?}", e);
                         }
                     },

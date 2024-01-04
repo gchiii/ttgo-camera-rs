@@ -112,7 +112,8 @@ pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>, tx: Se
             }))?;
             wifi.connect().await?;
             wifi.wait_netif_up().await?;
-
+            let ip = wifi.wifi().sta_netif().get_ip_info()?;
+            tx.send(ip.ip.to_string())?;
             info!("Connected to Wi-fi, now trying setting time from ntp.");
             ntp_sync()?;
 
