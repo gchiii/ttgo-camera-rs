@@ -9,6 +9,7 @@ use embedded_svc::ipv4::{IpInfo, Subnet, Mask};
 use esp_camera_rs::Camera;
 
 use esp_idf_sys::EspError;
+use flume::Sender;
 use futures::FutureExt;
 use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64}, prelude::I2CInterface, mode::DisplayConfig};
 
@@ -102,7 +103,7 @@ pub struct Config {
 
 
 
-fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
+fn init_http(cam: Arc<Mutex<Camera>>, tx: Sender<String>) -> Result<EspHttpServer> {
     let httpd_config = esp_idf_svc::http::server::Configuration {
         session_timeout: Duration::from_secs(5*50),
         uri_match_wildcard: true,
@@ -113,6 +114,9 @@ fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
     server.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
         let mut time = Instant::now();
         info!("handling request");
+        if let Err(e) = tx.send("handling request".to_owned()) {
+            error!("trouble sending: {}", e);
+        }
         let lock = cam.lock().unwrap(); // If a thread gets poisoned we're just dead anyways
         let _sensor = lock.sensor();
 
@@ -160,7 +164,7 @@ async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::R
     warn!("started display_runner!!!!!!!");
     let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
         .into_buffered_graphics_mode();
-    display.init();
+    let _ = display.init();
     draw_shapes(&mut display);
     if let Err(e) = display.flush() {
         error!("error: {:?}", e);
@@ -176,6 +180,7 @@ async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::R
             .recv(&rx, |thing| {
                 match thing {
                     Ok(text) => {
+                        warn!("disp: {}", text);
                         if let Err(e) = Text::with_baseline(text.as_str(), Point::zero(), text_style, Baseline::Top).draw(&mut display) {
                             error!("error: {:?}", e);
                         }
@@ -188,7 +193,7 @@ async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::R
                 Ok(())
             })
             .wait();
-        yield_now();
+        // yield_now().await;
     }
     // Ok(())
 }
@@ -208,19 +213,13 @@ fn main() -> Result<()> {
     let wakeup_reason = WakeupReason::get();
     info!("Last wakeup was due to {:#?}", wakeup_reason);
 
-    // let executor: LocalExecutor = Default::default();
-    // let executor: Executor<'static, 16> = Executor::new();
-
     let i2c = take_i2c();
     let sd_iface = bld_interface(i2c)?;
     let (tx, rx) = flume::unbounded::<String>();
-    // executor.spawn( display_runner(sd_iface, rx) ).detach();
 
     let mut wifi: EspWifi<'static> = create_esp_wifi();
     let mut mywifi: AsyncWifi<EspWifi<'static>> = AsyncWifi::wrap(wifi, SYS_LOOP.clone(), ESP_TASK_TIMER_SVR.clone()).unwrap();
-    // let wifi_task = executor.spawn(app_wifi_loop(mywifi, tx.clone()));
-    // let wifi_task = thread .spawn(app_wifi_loop(mywifi, tx.clone()));
-    // kickoff_camera_service();
+
     let p = PERIPHERALS.clone();
     let mut p = p.lock();
     let cam_sda = unsafe { &mut p.pins.gpio18.clone_unchecked()};
@@ -259,65 +258,25 @@ fn main() -> Result<()> {
         Some(cam_scl.into_ref().map_into()),
     )?;
     let camera_mutex = Arc::new(Mutex::new(camera));
-    // let _blah = async move {
-    //     Ok(if let Err(e) = init_http(camera_mutex) {
-    //         error!("init_http: {}", e);
-    //         return Err(e);
-    //     })
-    // };
-    let _http = match init_http(camera_mutex) {
+    let _http = match init_http(camera_mutex, tx.clone()) {
         Err(e) => {
             error!("init_http: {}", e);
             return Err(e);
         }
         Ok(h) => h,
     };
-    // let the_thing = match tokio::runtime::Builder::new_current_thread()
-    //     .max_blocking_threads(16)
-    //     .enable_time()
-    //     .build()
-    //     {
-    //     Ok(a_thing) => a_thing,
-    //     Err(e) => {
-    //         error!("tokio: {}", e);
-    //         return Err(e.into());
-    //     },
-    // };
-    // the_thing
-    let ex: Executor<'_, 16> = edge_executor::Executor::default();
-    // let some_tasks = async move {
-    //     futures::select! {
-    //         ret = display_runner(sd_iface, rx).fuse() => {
-    //             if let Err(e) = ret {
-    //                 error!("display: {}", e)
-    //             }
-    //         }
-    //         ret = app_wifi_loop(mywifi, tx.clone()).fuse() => {
-    //             if let Err(e) = ret {
-    //                 error!("wifi: {}", e)
-    //             }
-    //         }
-    //         // ret = blah.fuse() => {
-    //         //     if let Err(e) = ret {
-    //         //         error!("wifi: {}", e)
-    //         //     }
-    //         // }
-    //     }
-    // };
-    futures::executor::block_on(initial_wifi_connect(&mut mywifi));
-    let _disp_task = ex.spawn(display_runner(sd_iface, rx));
-    // let some_futures = embassy_futures::select::select(
-    //     display_runner(sd_iface, rx),
-    //     app_wifi_loop(mywifi, tx.clone())
-    // );
 
-    let _wifi_loop = ex.spawn( app_wifi_loop(mywifi, tx.clone()) );
-    // if let Err(e) = edge_executor::block_on(_wifi_loop) {
-    //     error!("oops: {}", e);
-    // }
-    if let Err(e) = edge_executor::block_on( ex.run(_wifi_loop) ) {
-        error!("oops: {}", e);
-    }
+    let ex: Executor<'_, 64> = edge_executor::Executor::default();
+    edge_executor::block_on( async move {
+        let _ = futures::executor::block_on(initial_wifi_connect(&mut mywifi, tx.clone()));
+        let _disp_task = ex.spawn(display_runner(sd_iface, rx));
+        let _wifi_loop = ex.spawn( app_wifi_loop(mywifi, tx.clone()) );
+        while ex.try_tick() {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+
+    } );
+
     drop(_http);
     Ok(())
     // executor.spawn(display_runner(sd_iface, rx)).detach();
