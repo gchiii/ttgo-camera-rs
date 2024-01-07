@@ -20,7 +20,7 @@ use std::{
 };
 
 
-use esp_idf_hal::{reset::{ResetReason, WakeupReason}, i2c::{I2cDriver}};
+use esp_idf_hal::{reset::{ResetReason, WakeupReason}, i2c::{I2cDriver}, gpio::{PinDriver, InputMode, self}};
 use esp_idf_svc::{
     hal::{
         peripheral::Peripheral
@@ -100,7 +100,7 @@ pub struct Config {
 
 
 
-fn init_http(cam: Arc<Mutex<Camera>>, tx: Sender<String>) -> Result<EspHttpServer> {
+fn init_http(cam: Arc<Mutex<Camera>>, tx: Sender<InfoUpdate>) -> Result<EspHttpServer> {
     let httpd_config = esp_idf_svc::http::server::Configuration {
         session_timeout: Duration::from_secs(5*50),
         uri_match_wildcard: true,
@@ -111,7 +111,7 @@ fn init_http(cam: Arc<Mutex<Camera>>, tx: Sender<String>) -> Result<EspHttpServe
     server.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
         let mut time = Instant::now();
         info!("handling request");
-        if let Err(e) = tx.send("handling request".to_owned()) {
+        if let Err(e) = tx.send(InfoUpdate::Msg("handling request".to_owned())) {
             error!("trouble sending: {}", e);
         }
         let lock = cam.lock().unwrap(); // If a thread gets poisoned we're just dead anyways
@@ -149,50 +149,24 @@ fn init_http(cam: Arc<Mutex<Camera>>, tx: Sender<String>) -> Result<EspHttpServe
     Ok(server)
 }
 
-async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::Receiver<String>) -> Result<()> {
-    warn!("started display_runner!!!!!!!");
-    let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
-        .into_buffered_graphics_mode();
-    let _ = display.init();
-    // draw_shapes(&mut display);
-    if let Err(e) = display.flush() {
-        error!("error: {:?}", e);
-    }
-    let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X12)
-        .text_color(BinaryColor::On)
-        .build();
-
-    let mut text_point = Point::zero();
-    warn!("blah");
+async fn pir_task(mut pir: PinDriver<'_, gpio::Gpio33, gpio::Input>, tx: Sender<InfoUpdate>) -> Result<()>
+{
+    warn!("pir_task");
+    tx.send(InfoUpdate::Motion(pir.get_level()))?;
     loop {
-        let _ = flume::Selector::new()
-            .recv(&rx, |thing| {
-                match thing {
-                    Ok(text) => {
-                        warn!("disp: {}", text);
-                        let d_text = Text::with_baseline(text.as_str(), text_point, text_style, Baseline::Top);
-                        match d_text.draw(&mut display) {
-                            Ok(p) => text_point.y += text_style.font.character_size.height as i32,
-                            Err(e) => error!("error: {:?}", e),
-                        }
-                        if let Err(e) = display.flush() {
-                            error!("error: {:?}", e);
-                        }
-                    },
-                    Err(e) => {
-                        error!("error: {:?}", e);
-                        return Err(anyhow!("display: {}", e));
-                    },
-                };
-                Ok(())
-            })
-            .wait();
-        // yield_now().await;
+        pir.wait_for_any_edge().await?;
+        tx.send(InfoUpdate::Motion(pir.get_level()))?;
     }
-    // Ok(())
 }
 
+async fn button_task(mut button: PinDriver<'_, gpio::Gpio34, gpio::Input>, tx: Sender<InfoUpdate>) -> Result<()> {
+    tx.send(InfoUpdate::Button(button.get_level()))?;
+    loop {
+        button.wait_for_any_edge().await?;
+        tx.send(InfoUpdate::Button(button.get_level()))?;
+        // std::thread::sleep(Duration::from_secs(1));
+    }
+}
 
 fn main() -> Result<()> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -210,7 +184,9 @@ fn main() -> Result<()> {
 
     let i2c = take_i2c();
     let sd_iface = bld_interface(i2c)?;
-    let (tx, rx) = flume::unbounded::<String>();
+    // let sd = SmallDisplay::new(sd_iface, DisplaySize128x64, DisplayRotation::Rotate0);
+
+    let (tx, rx) = flume::unbounded::<InfoUpdate>();
 
     let wifi: EspWifi<'static> = create_esp_wifi();
     let mut mywifi: AsyncWifi<EspWifi<'static>> = AsyncWifi::wrap(wifi, SYS_LOOP.clone(), ESP_TASK_TIMER_SVR.clone()).unwrap();
@@ -232,7 +208,13 @@ fn main() -> Result<()> {
     let pin_vsync = unsafe { &mut p.pins.gpio5.clone_unchecked()};
     let pin_href = unsafe { &mut p.pins.gpio27.clone_unchecked()};
     let pin_pclk = unsafe { &mut p.pins.gpio25.clone_unchecked()};
+    let pir_pin = unsafe {p.pins.gpio33.clone_unchecked()};
+    let pb_pin = unsafe {p.pins.gpio34.clone_unchecked()};
+    // let pir = PinDriver::input(pir_pin)?;
     drop(p);
+
+    let pir: PinDriver<'_, gpio::Gpio33, gpio::Input> = PinDriver::input(pir_pin)?;
+    let push_button: PinDriver<'_, gpio::Gpio34, gpio::Input> = PinDriver::input(pb_pin)?;
 
     let camera = Camera::new(
         Some(cam_pwdn.into_ref().map_into()),
@@ -264,6 +246,8 @@ fn main() -> Result<()> {
     let ex: Executor<'_, 64> = edge_executor::Executor::default();
     edge_executor::block_on( async move {
         let _ = futures::executor::block_on(initial_wifi_connect(&mut mywifi, tx.clone()));
+        let _button_task = ex.spawn(button_task(push_button, tx.clone()));
+        let _pir_task = ex.spawn(pir_task(pir, tx.clone()));
         let _disp_task = ex.spawn(display_runner(sd_iface, rx));
         let _wifi_loop = ex.spawn( app_wifi_loop(mywifi, tx.clone()) );
         while ex.try_tick() {

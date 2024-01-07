@@ -4,7 +4,7 @@ use esp_idf_svc::{
     wifi::{ClientConfiguration, Configuration},
 };
 use flume::Sender;
-use crate::{ntp::ntp_sync};
+use crate::{ntp::ntp_sync, small_display::InfoUpdate};
 use crate::peripherals::{take_gpio12_output, take_gpio13_output};
 
 use log::{info, warn};
@@ -91,8 +91,8 @@ pub fn prov_check() -> Result<bool> {
     }
 }
 
-pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>, tx: Sender<String>) -> Result<AccessPointInfo> {
-    tx.send("initial_wifi".to_owned())?;
+pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>, tx: Sender<InfoUpdate>) -> Result<AccessPointInfo> {
+    tx.send(InfoUpdate::Msg("initial_wifi".to_owned()))?;
     wifi.start().await?;
 
     // let scan_result = wifi_scan(wifi).await?;
@@ -113,7 +113,7 @@ pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>, tx: Se
             wifi.connect().await?;
             wifi.wait_netif_up().await?;
             let ip = wifi.wifi().sta_netif().get_ip_info()?;
-            tx.send(ip.ip.to_string())?;
+            tx.send(InfoUpdate::Addr(ip.ip))?;
             info!("Connected to Wi-fi, now trying setting time from ntp.");
             ntp_sync()?;
 
@@ -124,12 +124,12 @@ pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>, tx: Se
     }
 }
 
-pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>, tx: Sender<String>) -> Result<()> {
+pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>, tx: Sender<InfoUpdate>) -> Result<()> {
     let mut count = 0u8;
     let mut fail_count = 0u8;
 
     warn!("wifi_loop");
-    tx.send("msg".to_owned())?;
+    tx.send(InfoUpdate::Msg("msg".to_owned()))?;
     initial_wifi_connect(&mut wifi, tx.clone()).await?;
 
     loop {
@@ -145,7 +145,7 @@ pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>, tx: Sender<Str
             // }
 
             if fail_count > 0 {
-                tx.send("msg".to_owned())?;
+                tx.send(InfoUpdate::Msg("msg".to_owned()))?;
 
                 info!("Network failure detected, try re-connecting...");
                 wifi.disconnect().await?;
@@ -157,7 +157,7 @@ pub async fn app_wifi_loop(mut wifi: AsyncWifi<EspWifi<'static>>, tx: Sender<Str
         }
 
         if count >= 6 && fail_count > 0 {
-            tx.send("msg".to_owned())?;
+            tx.send(InfoUpdate::Msg("msg".to_owned()))?;
             if let Err(e) = ntp_sync() {
                 error!("ntp_sync: {}", e);
                 fail_count += 1;
