@@ -1,7 +1,18 @@
 
-use anyhow::{bail, Result};
-use edge_executor::LocalExecutor;
-use ssd1306::{rotation::DisplayRotation, size::DisplaySize128x64, mode::DisplayConfig};
+use anyhow::{Result};
+
+use edge_executor::{Executor};
+
+
+
+
+use esp_camera_rs::Camera;
+
+
+use flume::Sender;
+use futures::FutureExt;
+use preludes::InfoSender;
+
 
 
 use std::{
@@ -9,24 +20,41 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::PinDriver};
+
+use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::{PinDriver, self}};
 use esp_idf_svc::{
     hal::{
-        peripherals::Peripherals,
-        peripheral::Peripheral,
-        timer::{Timer, TimerDriver}
+        peripheral::Peripheral
     },
     io::Write,
-    eventloop::EspSystemEventLoop,
-    wifi::EspWifi,
-    http::server::{Configuration, EspHttpServer},
+    wifi::{EspWifi, AsyncWifi},
+    http::server::EspHttpServer,
 };
 use log::*;
 
+// use esp-camera-rs::Camera;
+
+// mod app;
+// mod ble;
+// mod build_env;
+// mod crypto;
+// mod http;
+// mod key_inspect;
+// mod mqtt;
+mod ntp;
+mod peripherals;
+mod preludes;
+// mod proto;
+mod wifi;
+
+mod small_display;
+mod window;
+// mod esp_camera;
+// use crate::esp_camera::Camera;
+
 // use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
-use ttgo_camera::{small_display::{init_display, draw_shapes}, wifi::init_wifi};
-use ttgo_camera::esp_camera::Camera;
-use ttgo_camera::wifi;
+use crate::{wifi::{app_wifi_loop, initial_wifi_connect}, peripherals::{take_i2c, SYS_LOOP, PERIPHERALS, ESP_TASK_TIMER_SVR, create_esp_wifi}};
+use crate::small_display::*;
 
 
 #[toml_cfg::toml_config]
@@ -74,49 +102,54 @@ pub struct Config {
 
 
 
-fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
-    let mut httpd_config = Configuration::default();
-    httpd_config.session_timeout = Duration::from_secs(5*50);
-    httpd_config.uri_match_wildcard = true;
+fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> Result<EspHttpServer> {
+    let httpd_config = esp_idf_svc::http::server::Configuration {
+        session_timeout: Duration::from_secs(5*50),
+        uri_match_wildcard: true,
+        ..Default::default()
+    };
     let mut server = EspHttpServer::new(&httpd_config)?;
 
     server.fn_handler("/", esp_idf_svc::http::Method::Get, move |request| {
         let mut time = Instant::now();
         info!("handling request");
-        let lock = cam.lock().unwrap(); // If a thread gets poisoned we're just fucked anyways
-        let fb = match lock.get_framebuffer() {
-            Some(fb) => fb,
-            None => {
-                let mut response = request.into_status_response(500)?;
-                let _ = writeln!(response, "Error: Unable to get framebuffer");
-                return Ok(());
-            }
-        };
-        info!("got the framebuffer");
-        // let jpeg = match fb.data_as_jpeg(20) {
-        //     Ok(jpeg) => jpeg,
-        //     Err(e) => {
-        //         let mut response = request.into_status_response(500)?;
-        //         let _ = writeln!(response, "init_http: Error: {:#?}", e);
-        //         return Ok(());
-        //     }
-        // };
-        let jpeg = fb.data();
-        info!("Took {}ms to capture_jpeg", time.elapsed().as_millis());
+        if let Err(e) = tx.send(InfoUpdate::Msg("handling request".to_owned())) {
+            error!("trouble sending: {}", e);
+        }
+        match cam.lock() {
+            Ok(lock) => {
+                let _sensor = lock.sensor();
+                let fb = match lock.get_framebuffer() {
+                    Some(fb) => fb,
+                    None => {
+                        let mut response = request.into_status_response(500)?;
+                        let _ = writeln!(response, "Error: Unable to get framebuffer");
+                        return Ok(());
+                    }
+                };
+                info!("got the framebuffer");
+                let jpeg = fb.data();
+                info!("Took {}ms to capture_jpeg", time.elapsed().as_millis());
 
-        // Send the image
-        time = Instant::now();
-        let mut response = request.into_response(
-            200,
-            None,
-            &[
-                ("Content-Type", "image/jpeg"),
-                ("Content-Length", &jpeg.len().to_string()),
-            ],
-        )?;
+                // Send the image
+                time = Instant::now();
+                let mut response = request.into_response(
+                    200,
+                    None,
+                    &[
+                        ("Content-Type", "image/jpeg"),
+                        ("Content-Length", &jpeg.len().to_string()),
+                    ],
+                )?;
 
-        let _ = response.write_all(jpeg);
-        info!("Took {}ms to send image", time.elapsed().as_millis());
+                let _ = response.write_all(jpeg);
+                info!("Took {}ms to send image", time.elapsed().as_millis());
+
+            },
+            Err(e) => {
+                error!("something terrible: {:?}", e);
+            },
+        }
 
         Ok(())
     })?;
@@ -124,6 +157,25 @@ fn init_http(cam: Arc<Mutex<Camera>>) -> Result<EspHttpServer> {
     Ok(server)
 }
 
+
+async fn pir_task(mut pir: PinDriver<'_, gpio::Gpio33, gpio::Input>, tx: InfoSender) -> Result<()>
+{
+    warn!("pir_task");
+    tx.send(InfoUpdate::Motion(pir.get_level().into()))?;
+    loop {
+        pir.wait_for_any_edge().await?;
+        tx.send(InfoUpdate::Motion(pir.get_level().into()))?;
+    }
+}
+
+async fn button_task(mut button: PinDriver<'_, gpio::Gpio34, gpio::Input>, tx: InfoSender) -> Result<()> {
+    tx.send(InfoUpdate::Button(button.get_level().into()))?;
+    loop {
+        button.wait_for_any_edge().await?;
+        tx.send(InfoUpdate::Button(button.get_level().into()))?;
+        // std::thread::sleep(Duration::from_secs(1));
+    }
+}
 
 fn main() -> Result<()> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
@@ -139,121 +191,82 @@ fn main() -> Result<()> {
     let wakeup_reason = WakeupReason::get();
     info!("Last wakeup was due to {:#?}", wakeup_reason);
 
-    let executor: LocalExecutor = Default::default();
-    edge_executor::block_on(executor.run(async_main()))
+    let i2c = take_i2c();
+    let sd_iface = bld_interface(i2c)?;
+    // let sd = SmallDisplay::new(sd_iface, DisplaySize128x64, DisplayRotation::Rotate0);
 
-}
+    let (tx, rx) = flume::unbounded::<InfoUpdate>();
 
-async fn async_main() -> Result<()> {
-    info!("starting async_main");
-    let mut peripherals = Peripherals::take()?;
+    let wifi: EspWifi<'static> = create_esp_wifi();
+    let mut mywifi: AsyncWifi<EspWifi<'static>> = AsyncWifi::wrap(wifi, SYS_LOOP.clone(), ESP_TASK_TIMER_SVR.clone()).unwrap();
 
-    let sysloop =  EspSystemEventLoop::take()?;
-    // let _nvs = EspDefaultNvsPartition::take()?;
+    let p = PERIPHERALS.clone();
+    let mut p = p.lock();
+    let cam_sda = unsafe { &mut p.pins.gpio18.clone_unchecked()};
+    let cam_scl = unsafe { &mut p.pins.gpio23.clone_unchecked()};
+    let cam_pwdn = unsafe { &mut p.pins.gpio26.clone_unchecked()};
+    let pin_xclk = unsafe { &mut p.pins.gpio4.clone_unchecked()};
+    let pin_d0 = unsafe { &mut p.pins.gpio34.clone_unchecked()};
+    let pin_d1 = unsafe { &mut p.pins.gpio13.clone_unchecked()};
+    let pin_d2 = unsafe { &mut p.pins.gpio14.clone_unchecked()};
+    let pin_d3 = unsafe { &mut p.pins.gpio35.clone_unchecked()};
+    let pin_d4 = unsafe { &mut p.pins.gpio39.clone_unchecked()};
+    let pin_d5 = unsafe { &mut p.pins.gpio12.clone_unchecked()};
+    let pin_d6 = unsafe { &mut p.pins.gpio15.clone_unchecked()};
+    let pin_d7 = unsafe { &mut p.pins.gpio36.clone_unchecked()};
+    let pin_vsync = unsafe { &mut p.pins.gpio5.clone_unchecked()};
+    let pin_href = unsafe { &mut p.pins.gpio27.clone_unchecked()};
+    let pin_pclk = unsafe { &mut p.pins.gpio25.clone_unchecked()};
+    let pir_pin = unsafe {p.pins.gpio33.clone_unchecked()};
+    let pb_pin = unsafe {p.pins.gpio34.clone_unchecked()};
+    // let pir = PinDriver::input(pir_pin)?;
+    drop(p);
 
-    let i2c = peripherals.i2c0;
-    let sda = peripherals.pins.gpio21;
-    let scl = peripherals.pins.gpio22;
-    let mut display = init_display(i2c, sda, scl, DisplaySize128x64, DisplayRotation::Rotate0)?
-        .into_buffered_graphics_mode();
-    display.init().map_err(|err| anyhow::anyhow!("{:?}", err))?;
-    draw_shapes(&mut display);
-    display.flush().map_err(|err| anyhow::anyhow!("{:?}", err))?;
+    let pir: PinDriver<'_, gpio::Gpio33, gpio::Input> = PinDriver::input(pir_pin)?;
+    let push_button: PinDriver<'_, gpio::Gpio34, gpio::Input> = PinDriver::input(pb_pin)?;
 
-    let cam_sda = (&mut peripherals.pins.gpio18).into_ref().map_into();
-    let cam_scl = (&mut peripherals.pins.gpio23).into_ref().map_into();
-    let cam_pwdn = (&mut peripherals.pins.gpio26).into_ref().map_into();
     let camera = Camera::new(
-        Some(cam_pwdn),
+        Some(cam_pwdn.into_ref().map_into()),
         None,
-        &mut peripherals.pins.gpio4,
-        &mut peripherals.pins.gpio34,
-        &mut peripherals.pins.gpio13,
-        &mut peripherals.pins.gpio14,
-        &mut peripherals.pins.gpio35,
-        &mut peripherals.pins.gpio39,
-        &mut peripherals.pins.gpio12,
-        &mut peripherals.pins.gpio15,
-        &mut peripherals.pins.gpio36,
-        &mut peripherals.pins.gpio5,
-        &mut peripherals.pins.gpio27,
-        &mut peripherals.pins.gpio25,
-        Some(cam_sda),
-        Some(cam_scl),
+        pin_xclk,
+        pin_d0,
+        pin_d1,
+        pin_d2,
+        pin_d3,
+        pin_d4,
+        pin_d5,
+        pin_d6,
+        pin_d7,
+        pin_vsync,
+        pin_href,
+        pin_pclk,
+        Some(cam_sda.into_ref().map_into()),
+        Some(cam_scl.into_ref().map_into()),
     )?;
     let camera_mutex = Arc::new(Mutex::new(camera));
-    // if let Ok(c) = camera_mutex.lock() {
-    //     let _sensor = c.sensor();
-    //     if let Err(e) = _sensor.init_status() {
-    //         log::error!("{}", e);
-    //     }
-    //     // if let Err(e) = _sensor.set_framesize(framesize) {
-    //     //     log::error!("{}", e);
-    //     // }
-    // }
-    let wifi = init_wifi(
-        CONFIG.wifi_ssid,
-        CONFIG.wifi_psk,
-        &mut peripherals.modem,
-        sysloop.clone(),
-    )
-    .await?;
-
-    let _httpd = match init_http(camera_mutex) {
-        Ok(h) => h,
+    let _http = match init_http(camera_mutex, tx.clone()) {
         Err(e) => {
-            error!("something happenned: {:?}", e);
+            error!("init_http: {}", e);
             return Err(e);
-        },
+        }
+        Ok(h) => h,
     };
-    // let button = PinDriver::input(peripherals.pins.gpio34)?;
-    let pir = PinDriver::input(peripherals.pins.gpio33);
 
-    let main_loop = main_loop(peripherals.timer00, wifi, sysloop).await;
-    drop(_httpd);
-    main_loop
-}
-
-async fn main_loop(
-    timer: impl Peripheral<P = impl Timer>,
-    mut wifi: Box<EspWifi<'_>>,
-    sysloop: EspSystemEventLoop,
-) -> Result<()> {
-    let mut delay_driver = TimerDriver::new(timer, &Default::default())?;
-
-    'main: loop {
-        match wifi.is_up() {
-            Ok(false) | Err(_) => {
-                warn!("WiFi died, attempting to reconnect...");
-                let mut counter = 0;
-                loop {
-                    if wifi::connect(
-                        CONFIG.wifi_ssid,
-                        CONFIG.wifi_psk,
-                        sysloop.clone(),
-                        &mut wifi,
-                    )
-                    .await
-                    .is_ok()
-                    {
-                        info!("WiFi reconnected successfully.");
-                        break;
-                    }
-                    counter += 1;
-                    warn!("Failed to connect to wifi, attempt {}", counter);
-
-                    // If we fail to connect for long enough, reset the damn processor
-                    if counter > 10 {
-                        break 'main;
-                    }
-                }
-            }
-            _ => {}
+    let ex: Executor<'_, 64> = edge_executor::Executor::default();
+    edge_executor::block_on( async move {
+        let _ = futures::executor::block_on(initial_wifi_connect(&mut mywifi, tx.clone()));
+        let _button_task = ex.spawn(button_task(push_button, tx.clone()));
+        let _pir_task = ex.spawn(pir_task(pir, tx.clone()));
+        let _disp_task = ex.spawn(display_runner(sd_iface, rx));
+        let _wifi_loop = ex.spawn( app_wifi_loop(mywifi, tx.clone()) );
+        while ex.try_tick() {
+            std::thread::sleep(Duration::from_secs(1));
         }
 
-        delay_driver.delay(1000).await?;
-    }
+    } );
 
-    bail!("Something went horribly wrong!!!")
+    drop(_http);
+    Ok(())
 }
+
 
