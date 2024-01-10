@@ -40,7 +40,10 @@ pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>, tx: In
                 ssid,
                 password: psk,
                 channel: Some(ap.channel),
-                auth_method: ap.auth_method,
+                auth_method: match ap.auth_method {
+                    Some(a) => a,
+                    None => embedded_svc::wifi::AuthMethod::default(),
+                },
                 ..Default::default()
             }))?;
             wifi.connect().await?;

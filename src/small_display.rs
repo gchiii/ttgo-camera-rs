@@ -6,6 +6,7 @@ use std::time::Duration;
 use embedded_graphics::geometry::AnchorPoint;
 use embedded_graphics::primitives::*;
 
+use embedded_hal::digital;
 use embedded_layout::{
     layout::linear::{spacing, Horizontal, LinearLayout, Vertical},
     prelude::*,
@@ -138,8 +139,8 @@ static DEFAULT_TEXT_STYLE: Lazy<Mutex<MonoTextStyle<'static, BinaryColor>>> = La
 #[derive(Clone, Debug)]
 pub enum InfoUpdate {
     Addr(Ipv4Addr),
-    Button(gpio::Level),
-    Motion(gpio::Level),
+    Button(digital::PinState),
+    Motion(digital::PinState),
     Msg(String),
 }
 
@@ -151,9 +152,7 @@ pub enum InfoUpdate {
 // use the rest for messages
 
 const LONGEST_IPV4_ADDR: &str = "255.255.255.255";
-
-type StatusInfoGpio = Option<gpio::Level>;
-
+type StatusInfoGpio = Option<digital::PinState>;
 #[derive(Clone, Debug)]
 pub struct StatusInfo<'txt, C: PixelColor> {
     address: Ipv4Addr,
@@ -211,8 +210,8 @@ impl<'txt> StatusInfo<'txt, BinaryColor> {
     #[inline]
     pub fn gpio_status_as_str(gpio_stat: &StatusInfoGpio) -> &str {
         match gpio_stat {
-            Some(gpio::Level::High) => "High",
-            Some(gpio::Level::Low) => "Low",
+            Some(digital::PinState::High) => "High",
+            Some(digital::PinState::Low) => "Low",
             None => "None",
         }
     }

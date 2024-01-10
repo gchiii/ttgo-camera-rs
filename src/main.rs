@@ -116,34 +116,40 @@ fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> Result<EspHttpServer> {
         if let Err(e) = tx.send(InfoUpdate::Msg("handling request".to_owned())) {
             error!("trouble sending: {}", e);
         }
-        let lock = cam.lock().unwrap(); // If a thread gets poisoned we're just dead anyways
-        let _sensor = lock.sensor();
+        match cam.lock() {
+            Ok(lock) => {
+                let _sensor = lock.sensor();
+                let fb = match lock.get_framebuffer() {
+                    Some(fb) => fb,
+                    None => {
+                        let mut response = request.into_status_response(500)?;
+                        let _ = writeln!(response, "Error: Unable to get framebuffer");
+                        return Ok(());
+                    }
+                };
+                info!("got the framebuffer");
+                let jpeg = fb.data();
+                info!("Took {}ms to capture_jpeg", time.elapsed().as_millis());
 
-        let fb = match lock.get_framebuffer() {
-            Some(fb) => fb,
-            None => {
-                let mut response = request.into_status_response(500)?;
-                let _ = writeln!(response, "Error: Unable to get framebuffer");
-                return Ok(());
-            }
-        };
-        info!("got the framebuffer");
-        let jpeg = fb.data();
-        info!("Took {}ms to capture_jpeg", time.elapsed().as_millis());
+                // Send the image
+                time = Instant::now();
+                let mut response = request.into_response(
+                    200,
+                    None,
+                    &[
+                        ("Content-Type", "image/jpeg"),
+                        ("Content-Length", &jpeg.len().to_string()),
+                    ],
+                )?;
 
-        // Send the image
-        time = Instant::now();
-        let mut response = request.into_response(
-            200,
-            None,
-            &[
-                ("Content-Type", "image/jpeg"),
-                ("Content-Length", &jpeg.len().to_string()),
-            ],
-        )?;
+                let _ = response.write_all(jpeg);
+                info!("Took {}ms to send image", time.elapsed().as_millis());
 
-        let _ = response.write_all(jpeg);
-        info!("Took {}ms to send image", time.elapsed().as_millis());
+            },
+            Err(e) => {
+                error!("something terrible: {:?}", e);
+            },
+        }
 
         Ok(())
     })?;
@@ -151,21 +157,22 @@ fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> Result<EspHttpServer> {
     Ok(server)
 }
 
+
 async fn pir_task(mut pir: PinDriver<'_, gpio::Gpio33, gpio::Input>, tx: InfoSender) -> Result<()>
 {
     warn!("pir_task");
-    tx.send(InfoUpdate::Motion(pir.get_level()))?;
+    tx.send(InfoUpdate::Motion(pir.get_level().into()))?;
     loop {
         pir.wait_for_any_edge().await?;
-        tx.send(InfoUpdate::Motion(pir.get_level()))?;
+        tx.send(InfoUpdate::Motion(pir.get_level().into()))?;
     }
 }
 
 async fn button_task(mut button: PinDriver<'_, gpio::Gpio34, gpio::Input>, tx: InfoSender) -> Result<()> {
-    tx.send(InfoUpdate::Button(button.get_level()))?;
+    tx.send(InfoUpdate::Button(button.get_level().into()))?;
     loop {
         button.wait_for_any_edge().await?;
-        tx.send(InfoUpdate::Button(button.get_level()))?;
+        tx.send(InfoUpdate::Button(button.get_level().into()))?;
         // std::thread::sleep(Duration::from_secs(1));
     }
 }
@@ -260,11 +267,6 @@ fn main() -> Result<()> {
 
     drop(_http);
     Ok(())
-    // executor.spawn(display_runner(sd_iface, rx)).detach();
-    // let main_task = executor.spawn(async_main(tx));
-    // edge_executor::block_on(main_task)
-    // edge_executor::block_on(executor.run(async_main(tx)))
-    // edge_executor::block_on(async_main())
 }
 
 
