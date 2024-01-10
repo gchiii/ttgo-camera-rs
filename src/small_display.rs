@@ -12,23 +12,17 @@ use embedded_layout::{
     ViewGroup,
 };
 
-use embedded_layout::align::*;
-
 use embedded_layout::object_chain::Chain;
 
+use esp_idf_hal::gpio::{self};
+use esp_idf_hal::i2c::I2cDriver;
 
-use embedded_text::TextBox;
-use embedded_text::alignment::HorizontalAlignment;
-use embedded_text::style::{TextBoxStyleBuilder, HeightMode};
-use esp_idf_hal::gpio::{InputPin, OutputPin, self};
-use esp_idf_hal::i2c::{I2c, I2cDriver, I2cConfig};
-use esp_idf_hal::peripheral::Peripheral;
-use esp_idf_hal::units::*;
+
 
 use esp_idf_sys::EspError;
-use log::info;
+use log::{info, warn};
 use log::error;
-use once_cell::sync::{OnceCell, Lazy};
+use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use thiserror::Error;
 use display_interface::DisplayError;
@@ -43,7 +37,7 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
-use crate::small_display;
+use crate::{small_display, preludes::InfoReceiver, window::{LabeledText, InputStatsRow, LabeledTextBuilder}};
 
 #[derive(Error, Debug)]
 pub enum SmallDisplayError {
@@ -99,10 +93,7 @@ where
         rotation: DisplayRotation,
     ) -> Self where SIZE: DisplaySize {
         let display = Ssd1306::new(interface, size, rotation).into_buffered_graphics_mode();
-        let text_style = MonoTextStyleBuilder::new()
-            .font(&FONT_6X12)
-            .text_color(BinaryColor::On)
-            .build();
+        let text_style = *DEFAULT_TEXT_STYLE.lock();
         Self { display , text_style}
     }
     pub fn init(&mut self) -> Result<(), SmallDisplayError> {
@@ -131,140 +122,17 @@ pub fn init_display(
     Ok(disp)
 }
 
-pub fn draw_shapes<D, E>(display: &mut D) where D: DrawTarget<Color = BinaryColor, Error = E>, E: std::fmt::Debug
-{
-    let yoffset = 8;
-
-    let style = PrimitiveStyleBuilder::new()
-        .stroke_width(1)
-        .stroke_color(BinaryColor::On)
-        .build();
-
-    // screen outline
-    // default display size is 128x64 if you don't pass a _DisplaySize_
-    // enum to the _Builder_ struct
-    Rectangle::new(Point::new(0, 0), Size::new(127, 31))
-        .into_styled(style)
-        .draw(display)
-        .unwrap();
-
-    // triangle
-    Triangle::new(
-        Point::new(16, 16 + yoffset),
-        Point::new(16 + 16, 16 + yoffset),
-        Point::new(16 + 8, yoffset),
-    )
-    .into_styled(style)
-    .draw(display)
-    .unwrap();
-
-    // square
-    Rectangle::new(Point::new(52, yoffset), Size::new_equal(16))
-        .into_styled(style)
-        .draw(display)
-        .unwrap();
-
-    // circle
-    Circle::new(Point::new(88, yoffset), 16)
-        .into_styled(style)
-        .draw(display)
-        .unwrap();
-
-}
-
-pub fn draw_some_text<D: DrawTarget<Color = BinaryColor>>(display: &mut D) where <D as DrawTarget>::Error: std::fmt::Debug
-{
-    let text_style = MonoTextStyleBuilder::new()
-        .font(&FONT_6X12)
-        .text_color(BinaryColor::On)
-        .build();
-
-    Text::with_baseline("Hello world!", Point::zero(), text_style, Baseline::Top)
-        .draw(display)
-        .unwrap();
-
-    Text::with_baseline("Hello Rust!", Point::new(0, 16), text_style, Baseline::Top)
-        .draw(display)
-        .unwrap();
-}
-
 type DefaultTextStyle<'a> = MonoTextStyle<'a, BinaryColor>;
 type MsgBoxText<'a> = Text<'a, DefaultTextStyle<'a>>;
-#[derive(Clone, Debug)]
-pub struct MsgBox<'a> {
-    char_style: DefaultTextStyle<'a>,
-    bounds: Rectangle,
-    _phantom: PhantomData<&'a bool>,
-}
 
 static DEFAULT_TEXT_STYLE: Lazy<Mutex<MonoTextStyle<'static, BinaryColor>>> = Lazy::new(|| {
     Mutex::new(MonoTextStyleBuilder::new()
         .font(&FONT_6X12)
         .text_color(BinaryColor::On)
+        .background_color(BinaryColor::Off)
         .build()
     )
 });
-
-impl<'a> Default for MsgBox<'a> {
-    fn default() -> Self {
-        let char_style = *DEFAULT_TEXT_STYLE.lock();
-        // let char_style: MonoTextStyle<'a, BinaryColor> = MonoTextStyleBuilder::new()
-        //     .font(&FONT_6X12)
-        //     .text_color(BinaryColor::On)
-        //     .build();
-        Self { char_style, bounds: Default::default(), _phantom: PhantomData }
-    }
-}
-
-impl<'a> MsgBox<'a> {
-    pub fn new(bounds: Rectangle) -> Self {
-        Self {
-            bounds,
-            ..Default::default()
-        }
-    }
-
-    pub fn create(bounds_box: Rectangle, label: &'a str, text: &'a str) -> LinearLayout<Horizontal<vertical::Top>, Link<MsgBoxText<'a>, Chain<MsgBoxText<'a>>>>     {
-        let char_style = *DEFAULT_TEXT_STYLE.lock();
-
-        let line_one = LinearLayout::horizontal(
-            Chain::new(
-                Text::new(label, Point::zero(), char_style))
-                .append(Text::new(text, Point::zero(), char_style))
-        )
-        .with_alignment(vertical::Top)
-        .arrange()
-        .align_to(&bounds_box, horizontal::Center, vertical::Center);
-
-        line_one
-    }
-
-
-}
-
-//  where <D as DrawTarget>::Error: std::fmt::Debug)
-pub fn msg_box<D: DrawTarget<Color = BinaryColor>>(msg: &str, bounds_box: Rectangle, display: &mut D) -> Result<(),SmallDisplayError> {
-    let character_style = MonoTextStyle::new(&FONT_6X12, BinaryColor::On);
-    let textbox_style = TextBoxStyleBuilder::new()
-        .height_mode(HeightMode::FitToText)
-        .alignment(HorizontalAlignment::Justified)
-        .paragraph_spacing(6)
-        .build();
-    let line_one = LinearLayout::horizontal(
-        Chain::new(Text::new("IP:", Point::zero(), character_style))
-            .append(Text::new(msg, Point::zero(), character_style))
-
-    )
-    .with_alignment(vertical::Top)
-    .arrange()
-    .align_to(&bounds_box, horizontal::Center, vertical::Center);
-
-    // Specify the bounding box. Note the 0px height. The `FitToText` height mode will
-    // measure and adjust the height of the text box in `into_styled()`.
-    // Create the text box and apply styling options.
-    // TextBox::with_textbox_style(msg, bounds_box, character_style, textbox_style)
-    Ok(())
-}
 
 
 #[derive(Clone, Debug)]
@@ -282,302 +150,182 @@ pub enum InfoUpdate {
 // next line has PIR and Button
 // use the rest for messages
 
-
-pub fn layout_box<'a>(label: &'a str, text: &'a str) -> LinearLayout<Horizontal<embedded_layout::align::vertical::Bottom>, embedded_layout::object_chain::Link<embedded_graphics::text::Text<'a, MonoTextStyle<'a, BinaryColor>>, embedded_layout::object_chain::Chain<embedded_graphics::text::Text<'a, MonoTextStyle<'a, BinaryColor>>>>> {
-    let char_style = *DEFAULT_TEXT_STYLE.lock();
-    let mut lbl = Text::new(label, Point::zero(), char_style);
-    let mut val = Text::new(text, Point::zero(), char_style);
-    LinearLayout::horizontal(Chain::new(lbl).append(val)).arrange()
-}
-
-pub fn box_test<'d>(interface: I2CInterface<I2cDriver<'d>>) -> Result<(), SmallDisplayError> {
-    info!("started display_runner!!!!!!!");
-    let character_style = *DEFAULT_TEXT_STYLE.lock();
-    let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
-        .into_buffered_graphics_mode();
-    display.init()?;
-    display.init()?;
-
-    let m_box = small_display::MsgBox::create(display.bounding_box(), "Hello", "World");
-    m_box.draw(&mut display)?;
-    display.flush()?;
-
-    Ok(())
-}
-
-
-#[derive(ViewGroup, Clone)]
-struct LabeledText<'txt, C: PixelColor> {
-    label: Text<'txt, MonoTextStyle<'static, C>>,
-    text: Text<'txt, MonoTextStyle<'static, C>>,
-}
-
-impl<'txt, C: PixelColor> LabeledText<'txt, C> {
-    fn new(lbl: &'txt str, txt: &'txt str, char_style: MonoTextStyle<'static, C>) -> Self {
-        let label: Text<'txt, MonoTextStyle<'static, C>> = Text::new(lbl, Point::zero(), char_style);
-        let text: Text<'txt, MonoTextStyle<'static, C>> = Text::new(txt, Point::zero(), char_style);
-        Self { label, text }
-    }
-}
-
-#[derive(Clone, ViewGroup)]
-struct LayoutLabeledText<'txt, C: PixelColor> {
-    layout: LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, LabeledText<'txt, C>>,
-}
-
-impl<'txt, C: PixelColor> LayoutLabeledText<'txt, C> {
-    fn new(lbl: &'txt str, txt: &'txt str, char_style: MonoTextStyle<'static, C>) -> Self {
-        let labeled_text: LabeledText<'txt, C> = LabeledText::new(lbl, txt, char_style);
-        // let layout: LinearLayout<Horizontal<vertical::Center, spacing::FixedMargin>, LabeledText<'txt, C>> =
-        let layout = LinearLayout::horizontal(labeled_text)
-            .with_alignment(vertical::Center)
-            .with_spacing(spacing::FixedMargin(3));
-        Self { layout }
-    }
-}
-
-#[derive(ViewGroup, Clone)]
-struct InputRow<'txt, C: PixelColor> {
-    button: LayoutLabeledText<'txt, C>,
-    motion: LayoutLabeledText<'txt, C>,
-}
-
-impl<'txt, C: PixelColor> InputRow<'txt, C> {
-    fn new(button_text: &'txt str, motion_text: &'txt str, char_style: MonoTextStyle<'static, C>) -> Self {
-        let button: LayoutLabeledText<'txt, C> = LayoutLabeledText::new("btn:", button_text, char_style);
-        let motion: LayoutLabeledText<'txt, C> = LayoutLabeledText::new("pir:", motion_text, char_style);
-        Self {
-            button,
-            motion
-        }
-    }
-}
-
-#[derive(ViewGroup, Clone)]
-struct LayoutInputRow<'txt, C: PixelColor> {
-    layout: LinearLayout<
-        Horizontal<vertical::Center, spacing::FixedMargin>,
-        InputRow<'txt, C>,
-    >,
-}
-
-impl<'txt, C: PixelColor> LayoutInputRow<'txt, C> {
-    fn new(button_text: &'txt str, motion_text: &'txt str, char_style: MonoTextStyle<'static, C>) -> Self {
-        let input_row = InputRow::new(button_text, motion_text, char_style);
-        let layout = LinearLayout::horizontal(input_row)
-            .with_alignment(vertical::Center)
-            .with_spacing(spacing::FixedMargin(3));
-        Self { layout }
-    }
-}
-
-#[derive(ViewGroup)]
-struct LayoutStatusWindow<'txt, C: PixelColor> {
-    layout: LinearLayout<
-        Vertical<horizontal::Center, spacing::Tight>,
-        chain! {
-            LayoutLabeledText<'txt, C>,
-            LayoutInputRow<'txt, C>
-        }
-    >,
-}
-
-impl<'txt, C: PixelColor> Clone for LayoutStatusWindow<'txt, C> {
-    fn clone(&self) -> Self {
-        Self { layout: self.layout.clone() }
-    }
-}
-
-impl<'txt, C: PixelColor> LayoutStatusWindow<'txt, C> {
-    fn new(ip: &'txt str, button_text: &'txt str, motion_text: &'txt str, char_style: MonoTextStyle<'static, C>) -> Self {
-        let ip_row = LayoutLabeledText::new("IP:", ip, char_style);
-        let inp_row = LayoutInputRow::new(button_text, motion_text, char_style);
-        let layout = LinearLayout::vertical(Chain::new(ip_row).append(inp_row))
-            .with_alignment(horizontal::Center)
-            .with_spacing(spacing::Tight);
-        Self { layout }
-    }
-}
-
-
 const LONGEST_IPV4_ADDR: &str = "255.255.255.255";
-#[derive(Clone)]
-pub struct InfoScreen<'txt, C: PixelColor> {
-    character_style: MonoTextStyle<'static, C>,
-    ip_address: heapless::String<{LONGEST_IPV4_ADDR.len()}>,
-    pir_str: heapless::String<5>,
-    btn_str: heapless::String<5>,
-    _phantom: PhantomData<&'txt bool>,
+
+type StatusInfoGpio = Option<gpio::Level>;
+
+#[derive(Clone, Debug)]
+pub struct StatusInfo<'txt, C: PixelColor> {
+    address: Ipv4Addr,
+    button_state: StatusInfoGpio,
+    motion_state: StatusInfoGpio,
+    pub win: StatusWindow<'txt, C>,
+    ip_string: String,
 }
 
-impl<'txt, C: PixelColor> InfoScreen<'txt, C> {
-    pub fn new(ip: &Ipv4Addr, pir: &str, btn: &str, character_style: MonoTextStyle<'static, C>) -> Self {
-        let pir_str = match heapless::String::<5>::try_from(pir) {
-            Ok(s) => s,
-            Err(_) => heapless::String::new(),
-        };
-        let btn_str = match heapless::String::<5>::try_from(btn) {
-            Ok(s) => s,
-            Err(_) => heapless::String::new(),
-        };
-        let tmp_ip = ip.to_string();
-        let ip_address = match heapless::String::<{LONGEST_IPV4_ADDR.len()}>::try_from(tmp_ip.as_str()) {
-            Ok(s) => s,
-            Err(_) => heapless::String::new(),
-        };
+impl<'txt> Default for StatusInfo<'txt, BinaryColor> {
+    fn default() -> Self {
         Self {
-            character_style,
-            ip_address,
-            pir_str,
-            btn_str,
-            _phantom: PhantomData,
+            address: Ipv4Addr::UNSPECIFIED,
+            button_state: None,
+            motion_state: None,
+            win: StatusWindow::new(*DEFAULT_TEXT_STYLE.lock()),
+            ip_string: String::new(),
+        }
+    }
+}
+
+
+impl<'txt> StatusInfo<'txt, BinaryColor> {
+    pub fn new(address: Ipv4Addr, button_state: StatusInfoGpio, motion_state: StatusInfoGpio) -> Self {
+        Self {
+            address,
+            button_state,
+            motion_state,
+            win: StatusWindow::new(*DEFAULT_TEXT_STYLE.lock()),
+            ip_string: address.to_string(),
         }
     }
 
-    pub fn layout(&'txt self) -> LayoutStatusWindow<'txt, C> {
-        LayoutStatusWindow::new(&self.ip_address, &self.btn_str, &self.pir_str, self.character_style)
-    }
-
-    pub fn pir(&'txt mut self, pir: &str) -> &mut InfoScreen<'_, C> {
-        if let Ok(s) = heapless::String::<5>::try_from(pir) {
-            self.pir_str = s;
+    pub fn update<D: DrawTarget<Color=BinaryColor>>(&'txt mut self, info_update: &InfoUpdate, target: &mut D) -> Result<(), <D as DrawTarget>::Error> {
+        let mut win = self.win;
+        warn!("display update");
+        match info_update {
+            InfoUpdate::Addr(address) => {
+                self.set_address(address.to_owned());
+                win.set_ip_text(&self.ip_string);
+            },
+            InfoUpdate::Button(l) => {
+                self.button_state = Some(l.to_owned());
+                win.set_button_text(self.button_state_as_str());
+            },
+            InfoUpdate::Motion(l) => {
+                self.motion_state = Some(l.to_owned());
+                win.set_motion_text(self.motion_state_as_str());
+            },
+            InfoUpdate::Msg(ref m) => info!("update: {}", m),
         }
-        self
+        self.win.draw(target)
     }
 
-    pub fn btn(&'txt mut self, btn: &str) -> &mut InfoScreen<'_, C> {
-        if let Ok(s) = heapless::String::<5>::try_from(btn) {
-            self.btn_str = s;
+    #[inline]
+    pub fn gpio_status_as_str(gpio_stat: &StatusInfoGpio) -> &str {
+        match gpio_stat {
+            Some(gpio::Level::High) => "High",
+            Some(gpio::Level::Low) => "Low",
+            None => "None",
         }
-        self
+    }
+    #[inline]
+    pub fn button_state_as_str(&self) -> &str {
+        Self::gpio_status_as_str(&self.button_state)
+    }
+    #[inline]
+    pub fn motion_state_as_str(&self) -> &str {
+        Self::gpio_status_as_str(&self.motion_state)
     }
 
-    pub fn addr(&'txt mut self, ip: &Ipv4Addr) -> &mut InfoScreen<'_, C> {
-        if let Ok(s) = heapless::String::<{LONGEST_IPV4_ADDR.len()}>::try_from(ip.to_string().as_str()) {
-            self.ip_address = s;
-        }
-        self
+    pub fn address_as_str(&self) -> &str {
+        self.ip_string.as_str()
     }
 
+    pub fn set_address(&mut self, address: Ipv4Addr) {
+        self.address = address;
+        self.ip_string = address.to_string();
+    }
+
+    pub fn set_button_state(&mut self, button_state: StatusInfoGpio) {
+        self.button_state = button_state;
+    }
+
+    pub fn set_motion_state(&mut self, motion_state: StatusInfoGpio) {
+        self.motion_state = motion_state;
+    }
+}
+
+
+#[derive(Clone, Copy, Debug, ViewGroup)]
+pub struct StatusWindow<'txt, C: PixelColor> {
+    ip: LabeledText<'txt, C>,
+    inputs: InputStatsRow<'txt, C>,
+}
+
+impl<'txt, C: PixelColor> StatusWindow<'txt, C> {
+    pub fn new(style: MonoTextStyle<'static, C>) -> Self {
+        let mut ip_row = LabeledTextBuilder::new("IP:", style)
+            .with_text(LONGEST_IPV4_ADDR)
+            .build();
+        let mut input_row = InputStatsRow::new(style);
+
+        input_row.align_to_mut(&ip_row, horizontal::Left, vertical::TopToBottom);
+        let s = Self {
+            ip: LinearLayout::horizontal(ip_row).arrange().into_inner(),
+            inputs: input_row,
+        };
+        LinearLayout::vertical(s).with_spacing(spacing::FixedMargin(2)).arrange().into_inner()
+    }
+
+    pub fn set_ip_text(&mut self, text: &'txt str) {
+        self.ip.set_text(text)
+    }
+    pub fn set_button_text(&mut self, text: &'txt str) {
+        self.inputs.set_button_text(text)
+    }
+    pub fn set_motion_text(&mut self, text: &'txt str) {
+        self.inputs.set_motion_text(text)
+    }
 
 }
 
 
-
-
-pub async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: flume::Receiver<InfoUpdate>) -> Result<(), SmallDisplayError> {
+pub async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: InfoReceiver) -> Result<(), SmallDisplayError> {
     info!("started display_runner!!!!!!!");
-    let character_style = *DEFAULT_TEXT_STYLE.lock();
+    // let character_style: MonoTextStyle<'_, BinaryColor> = *DEFAULT_TEXT_STYLE.lock();
     let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
         .into_buffered_graphics_mode();
     display.init()?;
-    display.init()?;
 
-    display.flush()?;
 
     let display_bounds = display.bounding_box();
 
-    let status_thing = InfoScreen::new(&Ipv4Addr::UNSPECIFIED, "text", "text", character_style);
-    status_thing.layout().draw(&mut display)?;
-    display.flush()?;
-    thread::sleep(Duration::from_secs(2));
     display.clear_buffer();
     display.flush()?;
 
-    // let ip_box = Rectangle::new(Point::zero(), Size::new(display_bounds.size.width, character_style.font.character_size.height));
-    // let pz = Point::zero();
-    let mut ip_str = Ipv4Addr::UNSPECIFIED.to_string();
-    let mut btn_str = String::from("text");
-    let mut pir_str = String::from("text");
-    let mut messages = String::new();
-
-    let mut ip_display = layout_box("IP: ", ip_str.as_str() );
-    ip_display.draw(&mut display)?;
-    display.flush()?;
-    thread::sleep(Duration::from_secs(2));
-    display.clear_buffer();
-    display.flush()?;
-
-    let mut btn_display = layout_box("btn: ", &btn_str);
-    btn_display.draw(&mut display)?;
-    display.flush()?;
-    thread::sleep(Duration::from_secs(2));
-    display.clear_buffer();
-    display.flush()?;
-
-    let mut pir_display = layout_box("pir: ", &pir_str);
-    pir_display.draw(&mut display)?;
-    display.flush()?;
-    thread::sleep(Duration::from_secs(2));
-    display.clear_buffer();
-    display.flush()?;
-
-    let mut inp_display = LinearLayout::horizontal(Chain::new(btn_display).append(pir_display)).arrange();
-    inp_display.draw(&mut display)?;
-    display.flush()?;
-    thread::sleep(Duration::from_secs(2));
-    display.clear_buffer();
-    display.flush()?;
-
-    let mut status_disp = LinearLayout::vertical(Chain::new(ip_display).append(inp_display))
-        .arrange()
-        .align_to(&display_bounds, horizontal::Center, vertical::Top);
-    status_disp.draw(&mut display)?;
-    display.flush()?;
-    thread::sleep(Duration::from_secs(2));
-    display.clear_buffer();
-    display.flush()?;
-
-    let textbox_style = TextBoxStyleBuilder::new()
-        .height_mode(HeightMode::FitToText)
-        .alignment(HorizontalAlignment::Justified)
-        .paragraph_spacing(6)
-        .build();
-    let bounds = Rectangle::new(status_disp.bounds().anchor_point(AnchorPoint::BottomLeft), display_bounds.size - status_disp.size());
-
-    let mut text_box = TextBox::with_textbox_style(messages.as_str(), bounds, character_style, textbox_style);
-    text_box.draw(&mut display)?;
-
-    let mut text_point = Point::zero();
+    // let mut status_info = StatusInfo::default();
+    // status_info.win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
+    // status_info.win.draw(&mut display)?;
+    // display.flush()?;
 
     loop {
-        let _ = flume::Selector::new()
-            .recv(&rx, |thing| {
-                let info_update = match thing {
-                    Ok(x) => x,
-                    Err(e) => {
-                        error!("error: {:?}", e);
-                        return Err(SmallDisplayError::Other(format!("{}", e)));
-                    },
-                };
-                match info_update {
-                    InfoUpdate::Addr(ip) => {
-                        let ip_str = ip.to_string();
-                        info!("ip: {}", ip_str);
-                        // ip_display.inner().object.text = &ip_str;
-                        status_disp.draw(&mut display)?;
-                    },
-                    InfoUpdate::Button(level) => {
-                        let btn_str = format!("{:?}", level);
-                        info!("btn: {}", btn_str);
-                        status_disp.draw(&mut display)?;
-                    },
-                    InfoUpdate::Motion(level) => {
-                        let pir_str = format!("{:?}", level);
-                        info!("pir: {}", pir_str);
-                        status_disp.draw(&mut display)?;
-                    },
-                    InfoUpdate::Msg(text) => {
-                        info!("disp: {}", text);
-                        // messages.push_str("\n");
-                        // messages.push_str(&text);
-                        // text_box.text = messages.as_str();
-                        text_box.draw(&mut display)?;
-                    },
-                }
-                display.flush()?;
-                Ok(())
-            })
-            .wait();
+        let mut status_info = StatusInfo::default();
+        status_info.win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
+        status_info.win.draw(&mut display)?;
+        display.flush()?;
+            // let mut status_info = status_info.clone();
+        let info_update = match rx.recv() {
+            Ok(x) => x,
+            Err(e) => {
+                error!("error: {:?}", e);
+                return Err(SmallDisplayError::Other(format!("{}", e)));
+            },
+        };
+        match info_update {
+            InfoUpdate::Addr(ip) => {
+                info!("addr: {}", ip);
+            },
+            InfoUpdate::Button(level) => {
+                let btn_str = format!("{:?}", level);
+                info!("btn: {}", btn_str);
+            },
+            InfoUpdate::Motion(level) => {
+                let pir_str = format!("{:?}", level);
+                info!("pir: {}", pir_str);
+            },
+            InfoUpdate::Msg(ref text) => {
+                info!("disp: {}", text);
+            },
+        }
+        status_info.update(&info_update, &mut display)?;
+        display.flush()?;
     }
 }

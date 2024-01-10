@@ -1,9 +1,9 @@
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result};
 
 use edge_executor::{Executor};
 
-use embedded_graphics::{geometry::Point, text::{Baseline, Text}, pixelcolor::BinaryColor, mono_font::{MonoTextStyleBuilder, ascii::FONT_6X12}, Drawable};
+
 
 
 use esp_camera_rs::Camera;
@@ -11,7 +11,8 @@ use esp_camera_rs::Camera;
 
 use flume::Sender;
 use futures::FutureExt;
-use ssd1306::{rotation::DisplayRotation, size::{DisplaySize128x64}, prelude::I2CInterface, mode::DisplayConfig};
+use preludes::InfoSender;
+
 
 
 use std::{
@@ -20,7 +21,7 @@ use std::{
 };
 
 
-use esp_idf_hal::{reset::{ResetReason, WakeupReason}, i2c::{I2cDriver}, gpio::{PinDriver, InputMode, self}};
+use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::{PinDriver, self}};
 use esp_idf_svc::{
     hal::{
         peripheral::Peripheral
@@ -47,6 +48,7 @@ mod preludes;
 mod wifi;
 
 mod small_display;
+mod window;
 // mod esp_camera;
 // use crate::esp_camera::Camera;
 
@@ -100,7 +102,7 @@ pub struct Config {
 
 
 
-fn init_http(cam: Arc<Mutex<Camera>>, tx: Sender<InfoUpdate>) -> Result<EspHttpServer> {
+fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> Result<EspHttpServer> {
     let httpd_config = esp_idf_svc::http::server::Configuration {
         session_timeout: Duration::from_secs(5*50),
         uri_match_wildcard: true,
@@ -149,7 +151,7 @@ fn init_http(cam: Arc<Mutex<Camera>>, tx: Sender<InfoUpdate>) -> Result<EspHttpS
     Ok(server)
 }
 
-async fn pir_task(mut pir: PinDriver<'_, gpio::Gpio33, gpio::Input>, tx: Sender<InfoUpdate>) -> Result<()>
+async fn pir_task(mut pir: PinDriver<'_, gpio::Gpio33, gpio::Input>, tx: InfoSender) -> Result<()>
 {
     warn!("pir_task");
     tx.send(InfoUpdate::Motion(pir.get_level()))?;
@@ -159,7 +161,7 @@ async fn pir_task(mut pir: PinDriver<'_, gpio::Gpio33, gpio::Input>, tx: Sender<
     }
 }
 
-async fn button_task(mut button: PinDriver<'_, gpio::Gpio34, gpio::Input>, tx: Sender<InfoUpdate>) -> Result<()> {
+async fn button_task(mut button: PinDriver<'_, gpio::Gpio34, gpio::Input>, tx: InfoSender) -> Result<()> {
     tx.send(InfoUpdate::Button(button.get_level()))?;
     loop {
         button.wait_for_any_edge().await?;
