@@ -5,3 +5,4 @@
 /esp32-camera
 .env
 cfg.toml
+.DS_Store

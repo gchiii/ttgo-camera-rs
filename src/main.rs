@@ -77,29 +77,8 @@ pub struct Config {
 // Charging chip: IP5306 I2C
 // Camera: OV2640
 // Camera Resolution: 2 Megapixel
-
 // PIR input GPIO 19
 // BUTTON input GPIO 0
-
-// this is from https://makeradvisor.com/esp32-ttgo-t-camera-pir-sensor-oled/
-// const CAM_PIN_PWDN: ::std::os::raw::c_int = 26;   // define PWDN_GPIO_NUM -1
-// const CAM_PIN_RESET: ::std::os::raw::c_int = -1; //software reset will be performed   // define RESET_GPIO_NUM -1
-// const CAM_PIN_XCLK: ::std::os::raw::c_int = 4;   // define XCLK_GPIO_NUM 32
-// const CAM_PIN_SIOD: ::std::os::raw::c_int = 18;   // define SIOD_GPIO_NUM 13
-// const CAM_PIN_SIOC: ::std::os::raw::c_int = 23;   // define SIOC_GPIO_NUM 12
-// const CAM_PIN_D7: ::std::os::raw::c_int = 36;   // define Y9_GPIO_NUM 39
-// const CAM_PIN_D6: ::std::os::raw::c_int = 15;   // define Y8_GPIO_NUM 36
-// const CAM_PIN_D5: ::std::os::raw::c_int = 12;   // define Y7_GPIO_NUM 23
-// const CAM_PIN_D4: ::std::os::raw::c_int = 39;   // define Y6_GPIO_NUM 18
-// const CAM_PIN_D3: ::std::os::raw::c_int = 35;   // define Y5_GPIO_NUM 15
-// const CAM_PIN_D2: ::std::os::raw::c_int = 14;   // define Y4_GPIO_NUM 4
-// const CAM_PIN_D1: ::std::os::raw::c_int = 13;   // define Y3_GPIO_NUM 14
-// const CAM_PIN_D0: ::std::os::raw::c_int = 34;   // define Y2_GPIO_NUM 5
-// const CAM_PIN_VSYNC: ::std::os::raw::c_int = 5;   // define VSYNC_GPIO_NUM 27
-// const CAM_PIN_HREF: ::std::os::raw::c_int = 27;   // define HREF_GPIO_NUM 25
-// const CAM_PIN_PCLK: ::std::os::raw::c_int = 25;   // define PCLK_GPIO_NUM 19
-
-
 
 
 fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> Result<EspHttpServer> {
@@ -209,7 +188,6 @@ fn main() -> Result<()> {
     let mut p = p.lock();
     let cam_sda = unsafe { &mut p.pins.gpio18.clone_unchecked()};
     let cam_scl = unsafe { &mut p.pins.gpio23.clone_unchecked()};
-    let cam_pwdn = unsafe { &mut p.pins.gpio26.clone_unchecked()};
     let pin_xclk = unsafe { &mut p.pins.gpio4.clone_unchecked()};
     let pin_d0 = unsafe { &mut p.pins.gpio34.clone_unchecked()};
     let pin_d1 = unsafe { &mut p.pins.gpio13.clone_unchecked()};
@@ -222,9 +200,20 @@ fn main() -> Result<()> {
     let pin_vsync = unsafe { &mut p.pins.gpio5.clone_unchecked()};
     let pin_href = unsafe { &mut p.pins.gpio27.clone_unchecked()};
     let pin_pclk = unsafe { &mut p.pins.gpio25.clone_unchecked()};
+
+    let pin_mic_ws = unsafe { &mut p.pins.gpio32.clone_unchecked()};
+    let pin_mic_sck = unsafe { &mut p.pins.gpio26.clone_unchecked()};
+    let pin_mic_sd = unsafe { &mut p.pins.gpio33.clone_unchecked()};
+
+    #[cfg(feature="IP5306")]
+    {
+        // IP5306
+        let ip5306_led1 = unsafe { &mut p.pins.gpio22.clone_unchecked()};
+        let ip5306_led2 = unsafe { &mut p.pins.gpio21.clone_unchecked()};
+        let ip5306_led3 = unsafe { &mut p.pins.gpio2.clone_unchecked()};
+    }
     let pir_pin = unsafe {p.pins.gpio19.clone_unchecked()};
     let pb_pin = unsafe {p.pins.gpio0.clone_unchecked()};
-    // let pir = PinDriver::input(pir_pin)?;
     drop(p);
 
     let pir  = PinDriver::input(pir_pin)?;
@@ -232,7 +221,7 @@ fn main() -> Result<()> {
     push_button.set_pull(gpio::Pull::Up)?;
 
     let camera = Camera::new(
-        Some(cam_pwdn.into_ref().map_into()),
+        None,
         None,
         pin_xclk,
         pin_d0,
