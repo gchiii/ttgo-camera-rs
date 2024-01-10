@@ -21,7 +21,7 @@ use std::{
 };
 
 
-use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::{PinDriver, self}};
+use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::{PinDriver, self, InputPin, Input}};
 use esp_idf_svc::{
     hal::{
         peripheral::Peripheral
@@ -72,14 +72,14 @@ pub struct Config {
 // Display chip: SSD1306 I2C
 // Display type: OLED
 // Display resolution: 128×64
-// PIR: AS312   - on GPIO 33
+// PIR: AS312   - on GPIO 19
 // UART chip: CP2104
 // Charging chip: IP5306 I2C
 // Camera: OV2640
 // Camera Resolution: 2 Megapixel
 
-// PIR input GPIO33
-// BUTTON input GPIO 34
+// PIR input GPIO 19
+// BUTTON input GPIO 0
 
 // this is from https://makeradvisor.com/esp32-ttgo-t-camera-pir-sensor-oled/
 // const CAM_PIN_PWDN: ::std::os::raw::c_int = 26;   // define PWDN_GPIO_NUM -1
@@ -158,7 +158,9 @@ fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> Result<EspHttpServer> {
 }
 
 
-async fn pir_task(mut pir: PinDriver<'_, gpio::Gpio33, gpio::Input>, tx: InfoSender) -> Result<()>
+async fn pir_task<P>(mut pir: PinDriver<'_, P, gpio::Input>, tx: InfoSender) -> Result<()>
+where
+    P: InputPin,
 {
     warn!("pir_task");
     tx.send(InfoUpdate::Motion(pir.get_level().into()))?;
@@ -168,7 +170,10 @@ async fn pir_task(mut pir: PinDriver<'_, gpio::Gpio33, gpio::Input>, tx: InfoSen
     }
 }
 
-async fn button_task(mut button: PinDriver<'_, gpio::Gpio34, gpio::Input>, tx: InfoSender) -> Result<()> {
+async fn button_task<P>(mut button: PinDriver<'_, P, Input>, tx: InfoSender) -> Result<()>
+where
+    P: InputPin,
+{
     tx.send(InfoUpdate::Button(button.get_level().into()))?;
     loop {
         button.wait_for_any_edge().await?;
@@ -217,13 +222,14 @@ fn main() -> Result<()> {
     let pin_vsync = unsafe { &mut p.pins.gpio5.clone_unchecked()};
     let pin_href = unsafe { &mut p.pins.gpio27.clone_unchecked()};
     let pin_pclk = unsafe { &mut p.pins.gpio25.clone_unchecked()};
-    let pir_pin = unsafe {p.pins.gpio33.clone_unchecked()};
-    let pb_pin = unsafe {p.pins.gpio34.clone_unchecked()};
+    let pir_pin = unsafe {p.pins.gpio19.clone_unchecked()};
+    let pb_pin = unsafe {p.pins.gpio0.clone_unchecked()};
     // let pir = PinDriver::input(pir_pin)?;
     drop(p);
 
-    let pir: PinDriver<'_, gpio::Gpio33, gpio::Input> = PinDriver::input(pir_pin)?;
-    let push_button: PinDriver<'_, gpio::Gpio34, gpio::Input> = PinDriver::input(pb_pin)?;
+    let pir  = PinDriver::input(pir_pin)?;
+    let mut push_button = PinDriver::input(pb_pin)?;
+    push_button.set_pull(gpio::Pull::Up)?;
 
     let camera = Camera::new(
         Some(cam_pwdn.into_ref().map_into()),
