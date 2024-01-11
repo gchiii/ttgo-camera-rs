@@ -1,27 +1,14 @@
 use anyhow::Result;
+use anyhow::anyhow;
 use embedded_svc::wifi::AccessPointInfo;
-use esp_idf_svc::{
-    wifi::{ClientConfiguration, Configuration},
-};
-use flume::Sender;
+use esp_idf_svc::wifi::{ClientConfiguration, Configuration};
 use crate::{ntp::ntp_sync, small_display::InfoUpdate};
-use crate::peripherals::{take_gpio12_output, take_gpio13_output};
 
 use log::{info, warn};
 use crate::preludes::*;
-use esp_idf_hal::delay::FreeRtos;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
-use esp_idf_sys::{
-    esp_wifi_clear_ap_list, wifi_prov_event_handler_t, wifi_prov_mgr_config_t,
-    wifi_prov_mgr_deinit, wifi_prov_mgr_init, wifi_prov_mgr_is_provisioned,
-    wifi_prov_mgr_start_provisioning, wifi_prov_mgr_wait, wifi_prov_scheme_ble,
-    wifi_prov_security_WIFI_PROV_SECURITY_1,
-};
-use std::{
-    ffi::{c_void, CString},
-    ptr::null_mut,
-    thread,
-};
+use esp_idf_sys::esp_wifi_clear_ap_list;
+use std::thread;
 
 
 pub async fn initial_wifi_connect(wifi: &mut AsyncWifi<EspWifi<'static>>, tx: InfoSender) -> Result<AccessPointInfo> {
@@ -128,4 +115,4 @@ pub async fn wifi_scan<'a>(wifi: &'a mut AsyncWifi<EspWifi<'static>>) -> Result<
     Err(anyhow!("couldn't find ssid"))
 }
 
-pub type MacList = HeaplessVec<[u8; 6], 32>;
+// pub type MacList = HeaplessVec<[u8; 6], 32>;

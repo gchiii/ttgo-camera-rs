@@ -6,6 +6,7 @@ use std::net::UdpSocket;
 use std::ptr::null;
 use std::thread;
 use std::time::Duration;
+use anyhow::Result;
 
 fn unpack_ntp_data(buffer: &[u8; 48]) -> u64 {
     let mut reader = Cursor::new(buffer);

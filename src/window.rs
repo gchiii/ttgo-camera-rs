@@ -5,14 +5,12 @@ use std::marker::PhantomData;
 use embedded_graphics::{
     mono_font::MonoTextStyle,
     pixelcolor::PixelColor,
-    text::Text, primitives::Rectangle, geometry::Point,
-    // prelude::*,
+    text::Text, geometry::Point,
 };
 
 use embedded_layout::{
     layout::linear::{spacing, LinearLayout},
     prelude::*,
-    object_chain::Chain, view_group::{ViewGroupHelper, EMPTY_VIEW_GROUP},
     ViewGroup,
 };
 // use embedded_layout_macros::ViewGroup;

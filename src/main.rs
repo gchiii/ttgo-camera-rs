@@ -1,38 +1,20 @@
 
-use anyhow::{Result};
-
-use edge_executor::{Executor};
-
-
-
-
+use anyhow::Result as AnyResult;
+use edge_executor::Executor;
 use esp_camera_rs::Camera;
-
-
-use flume::Sender;
-use futures::FutureExt;
 use preludes::InfoSender;
-
-
-
 use std::{
     time::{Instant, Duration},
     sync::{Arc, Mutex},
 };
-
-
 use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::{PinDriver, self, InputPin, Input}};
 use esp_idf_svc::{
-    hal::{
-        peripheral::Peripheral
-    },
+    hal::peripheral::Peripheral,
     io::Write,
     wifi::{EspWifi, AsyncWifi},
     http::server::EspHttpServer,
 };
 use log::*;
-
-// use esp-camera-rs::Camera;
 
 // mod app;
 // mod ble;
@@ -44,15 +26,10 @@ use log::*;
 mod ntp;
 mod peripherals;
 mod preludes;
-// mod proto;
 mod wifi;
-
 mod small_display;
 mod window;
-// mod esp_camera;
-// use crate::esp_camera::Camera;
 
-// use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
 use crate::{wifi::{app_wifi_loop, initial_wifi_connect}, peripherals::{take_i2c, SYS_LOOP, PERIPHERALS, ESP_TASK_TIMER_SVR, create_esp_wifi}};
 use crate::small_display::*;
 
@@ -81,7 +58,7 @@ pub struct Config {
 // BUTTON input GPIO 0
 
 
-fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> Result<EspHttpServer> {
+fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> AnyResult<EspHttpServer> {
     let httpd_config = esp_idf_svc::http::server::Configuration {
         session_timeout: Duration::from_secs(5*50),
         uri_match_wildcard: true,
@@ -137,7 +114,7 @@ fn init_http(cam: Arc<Mutex<Camera>>, tx: InfoSender) -> Result<EspHttpServer> {
 }
 
 
-async fn pir_task<P>(mut pir: PinDriver<'_, P, gpio::Input>, tx: InfoSender) -> Result<()>
+async fn pir_task<P>(mut pir: PinDriver<'_, P, gpio::Input>, tx: InfoSender) -> AnyResult<()>
 where
     P: InputPin,
 {
@@ -149,7 +126,7 @@ where
     }
 }
 
-async fn button_task<P>(mut button: PinDriver<'_, P, Input>, tx: InfoSender) -> Result<()>
+async fn button_task<P>(mut button: PinDriver<'_, P, Input>, tx: InfoSender) -> AnyResult<()>
 where
     P: InputPin,
 {
@@ -161,10 +138,11 @@ where
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> AnyResult<()> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
+    peripherals::patch_eventfd();
 
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
@@ -201,9 +179,12 @@ fn main() -> Result<()> {
     let pin_href = unsafe { &mut p.pins.gpio27.clone_unchecked()};
     let pin_pclk = unsafe { &mut p.pins.gpio25.clone_unchecked()};
 
-    let pin_mic_ws = unsafe { &mut p.pins.gpio32.clone_unchecked()};
-    let pin_mic_sck = unsafe { &mut p.pins.gpio26.clone_unchecked()};
-    let pin_mic_sd = unsafe { &mut p.pins.gpio33.clone_unchecked()};
+    #[cfg(feature="MIC")]
+    {
+        let pin_mic_ws = unsafe { &mut p.pins.gpio32.clone_unchecked()};
+        let pin_mic_sck = unsafe { &mut p.pins.gpio26.clone_unchecked()};
+        let pin_mic_sd = unsafe { &mut p.pins.gpio33.clone_unchecked()};
+    }
 
     #[cfg(feature="IP5306")]
     {
@@ -255,7 +236,7 @@ fn main() -> Result<()> {
         let _disp_task = ex.spawn(display_runner(sd_iface, rx));
         let _wifi_loop = ex.spawn( app_wifi_loop(mywifi, tx.clone()) );
         while ex.try_tick() {
-            std::thread::sleep(Duration::from_secs(1));
+            std::thread::sleep(Duration::from_micros(250));
         }
 
     } );

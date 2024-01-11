@@ -1,12 +1,11 @@
 use crate::preludes::*;
-use esp_idf_hal::gpio::*;
+
 use esp_idf_hal::i2c::{config::Config as I2cConfig, I2cDriver};
 use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_hal::timer::{TimerConfig, TimerDriver};
+// use esp_idf_hal::timer::{TimerConfig, TimerDriver};
 
 use esp_idf_hal::units::*;
-// use esp_idf_hal::units::KiloHertz;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::timer::EspTaskTimerService;
@@ -42,6 +41,7 @@ pub fn create_esp_wifi() -> EspWifi<'static> {
     EspWifi::new(modem, SYS_LOOP.clone(), Some(NVS_DEFAULT_PARTITION.clone())).unwrap()
 }
 
+#[cfg(feature = "unused")]
 pub fn create_timer_driver_00() -> TimerDriver<'static> {
     let p = PERIPHERALS.clone();
     let mut p = p.lock();
@@ -51,37 +51,37 @@ pub fn create_timer_driver_00() -> TimerDriver<'static> {
     TimerDriver::new(timer, &config).unwrap()
 }
 
-macro_rules! define_gpio_input {
-    // Arguments are module name and function name of function to test bench
-    ($pin_num:expr) => {
-        // The macro will expand into the contents of this block.
-        paste::item! {
-            pub fn [< take_gpio $pin_num _input >]() -> PinDriver<'static, [< Gpio $pin_num >], Input> {
-                let p = PERIPHERALS.clone();
-                let mut p = p.lock();
-                let pin = unsafe { p.pins.[< gpio $pin_num >].clone_unchecked() };
-                drop(p);
-                PinDriver::input(pin).unwrap()
-            }
-        }
-    };
-}
+// macro_rules! define_gpio_input {
+//     // Arguments are module name and function name of function to test bench
+//     ($pin_num:expr) => {
+//         // The macro will expand into the contents of this block.
+//         paste::item! {
+//             pub fn [< take_gpio $pin_num _input >]() -> PinDriver<'static, [< Gpio $pin_num >], Input> {
+//                 let p = PERIPHERALS.clone();
+//                 let mut p = p.lock();
+//                 let pin = unsafe { p.pins.[< gpio $pin_num >].clone_unchecked() };
+//                 drop(p);
+//                 PinDriver::input(pin).unwrap()
+//             }
+//         }
+//     };
+// }
 
-macro_rules! define_gpio_output {
-    // Arguments are module name and function name of function to test bench
-    ($pin_num:expr) => {
-        // The macro will expand into the contents of this block.
-        paste::item! {
-            pub fn [< take_gpio $pin_num _output >]() -> PinDriver<'static, [< Gpio $pin_num >], Output> {
-                let p = PERIPHERALS.clone();
-                let mut p = p.lock();
-                let pin = unsafe { p.pins.[< gpio $pin_num >].clone_unchecked() };
-                drop(p);
-                PinDriver::output(pin).unwrap()
-            }
-        }
-    };
-}
+// macro_rules! define_gpio_output {
+//     // Arguments are module name and function name of function to test bench
+//     ($pin_num:expr) => {
+//         // The macro will expand into the contents of this block.
+//         paste::item! {
+//             pub fn [< take_gpio $pin_num _output >]() -> PinDriver<'static, [< Gpio $pin_num >], Output> {
+//                 let p = PERIPHERALS.clone();
+//                 let mut p = p.lock();
+//                 let pin = unsafe { p.pins.[< gpio $pin_num >].clone_unchecked() };
+//                 drop(p);
+//                 PinDriver::output(pin).unwrap()
+//             }
+//         }
+//     };
+// }
 
 // define_gpio_input!(0);
 // define_gpio_input!(1);
@@ -116,8 +116,8 @@ macro_rules! define_gpio_output {
 // define_gpio_output!(9);
 // define_gpio_output!(10);
 // define_gpio_output!(11);
-define_gpio_output!(12); // LED1
-define_gpio_output!(13); // LED2
+// define_gpio_output!(12); // LED1
+// define_gpio_output!(13); // LED2
 // define_gpio_output!(14);
 // define_gpio_output!(15);
 // define_gpio_output!(16);
@@ -140,19 +140,20 @@ pub fn take_i2c() -> I2cDriver<'static> {
     I2cDriver::new(i2c, pin_sda, pin_scl, &config).unwrap()
 }
 
-// pub fn take_uart() -> AsyncUartRxDriver<'static, UartRxDriver<'static>> {
-//     let p = PERIPHERALS.clone();
-//     let mut p = p.lock();
-//     let uart = unsafe { p.uart1.clone_unchecked() };
-//     let rx = unsafe { p.pins.gpio1.clone_unchecked() };
+#[cfg(feature = "unused")]
+pub fn take_uart() -> AsyncUartRxDriver<'static, UartRxDriver<'static>> {
+    let p = PERIPHERALS.clone();
+    let mut p = p.lock();
+    let uart = unsafe { p.uart1.clone_unchecked() };
+    let rx = unsafe { p.pins.gpio1.clone_unchecked() };
 
-//     let conf = UartConfig::new().baudrate(Hertz(4800));
-//     AsyncUartRxDriver::new(
-//         uart,
-//         rx,
-//         Option::<AnyIOPin>::None,
-//         Option::<AnyIOPin>::None,
-//         &conf,
-//     )
-//     .unwrap()
-// }
+    let conf = UartConfig::new().baudrate(Hertz(4800));
+    AsyncUartRxDriver::new(
+        uart,
+        rx,
+        Option::<AnyIOPin>::None,
+        Option::<AnyIOPin>::None,
+        &conf,
+    )
+    .unwrap()
+}

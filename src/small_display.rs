@@ -1,28 +1,14 @@
-use std::marker::PhantomData;
+
 use std::net::Ipv4Addr;
-use std::thread;
-use std::time::Duration;
-
-use embedded_graphics::geometry::AnchorPoint;
-use embedded_graphics::primitives::*;
-
 use embedded_hal::digital;
 use embedded_layout::{
-    layout::linear::{spacing, Horizontal, LinearLayout, Vertical},
+    layout::linear::{spacing, LinearLayout},
     prelude::*,
     ViewGroup,
 };
-
-use embedded_layout::object_chain::Chain;
-
-use esp_idf_hal::gpio::{self};
 use esp_idf_hal::i2c::I2cDriver;
-
-
-
 use esp_idf_sys::EspError;
-use log::{info, warn};
-use log::error;
+use log::{info, warn, error};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use thiserror::Error;
@@ -38,7 +24,7 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
-use crate::{small_display, preludes::InfoReceiver, window::{LabeledText, InputStatsRow, LabeledTextBuilder}};
+use crate::{preludes::InfoReceiver, window::{LabeledText, InputStatsRow, LabeledTextBuilder}};
 
 #[derive(Error, Debug)]
 pub enum SmallDisplayError {
@@ -186,25 +172,30 @@ impl<'txt> StatusInfo<'txt, BinaryColor> {
         }
     }
 
-    pub fn update<D: DrawTarget<Color=BinaryColor>>(&'txt mut self, info_update: &InfoUpdate, target: &mut D) -> Result<(), <D as DrawTarget>::Error> {
+    pub fn update<D: DrawTarget<Color=BinaryColor>>(&'txt mut self, info_update: &InfoUpdate, target: &mut D) -> Result<(), SmallDisplayError> {
         let mut win = self.win;
         warn!("display update");
         match info_update {
             InfoUpdate::Addr(address) => {
+                println!("ip: {}", address);
                 self.set_address(address.to_owned());
                 win.set_ip_text(&self.ip_string);
             },
             InfoUpdate::Button(l) => {
+                println!("button");
                 self.button_state = Some(l.to_owned());
                 win.set_button_text(self.button_state_as_str());
             },
             InfoUpdate::Motion(l) => {
+                println!("motion");
                 self.motion_state = Some(l.to_owned());
                 win.set_motion_text(self.motion_state_as_str());
             },
             InfoUpdate::Msg(ref m) => info!("update: {}", m),
         }
-        self.win.draw(target)
+        self.win.draw(target).map_err(|_e| SmallDisplayError::Other("DisplayError".to_string()))?;
+        // target.flush().map_err(|_e| SmallDisplayError::Other(format!("DisplayError")))?;
+        Ok(())
     }
 
     #[inline]
@@ -251,7 +242,7 @@ pub struct StatusWindow<'txt, C: PixelColor> {
 
 impl<'txt, C: PixelColor> StatusWindow<'txt, C> {
     pub fn new(style: MonoTextStyle<'static, C>) -> Self {
-        let mut ip_row = LabeledTextBuilder::new("IP:", style)
+        let ip_row = LabeledTextBuilder::new("IP:", style)
             .with_text(LONGEST_IPV4_ADDR)
             .build();
         let mut input_row = InputStatsRow::new(style);
@@ -295,11 +286,14 @@ pub async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: Info
     // status_info.win.draw(&mut display)?;
     // display.flush()?;
 
+    // let mut status_info = StatusInfo::default();
+    // status_info.win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
+    // status_info.win.draw(&mut display)?;
+    // display.flush()?;
     loop {
         let mut status_info = StatusInfo::default();
         status_info.win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
         status_info.win.draw(&mut display)?;
-        display.flush()?;
             // let mut status_info = status_info.clone();
         let info_update = match rx.recv() {
             Ok(x) => x,
