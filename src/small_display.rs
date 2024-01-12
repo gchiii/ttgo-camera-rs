@@ -1,5 +1,7 @@
 
 use std::net::Ipv4Addr;
+use display_interface::DisplayError;
+// use display_interface::DisplayError;
 use embedded_hal::digital;
 use embedded_layout::{
     layout::linear::{spacing, LinearLayout},
@@ -12,7 +14,6 @@ use log::{info, warn, error};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use thiserror::Error;
-use display_interface::DisplayError;
 use embedded_graphics::prelude::*;
 use embedded_graphics::mono_font::MonoTextStyle;
 use ssd1306::mode::BufferedGraphicsMode;
@@ -31,7 +32,7 @@ pub enum SmallDisplayError {
     #[error("DrawTarget Error: {0}")]
     Draw(String),
 
-    #[error("DisplayError: {0:?}")]
+    #[error("{0:?}")]
     Display(DisplayError),
 
     #[error(transparent)]
@@ -83,11 +84,11 @@ where
         let text_style = *DEFAULT_TEXT_STYLE.lock();
         Self { display , text_style}
     }
-    pub fn init(&mut self) -> Result<(), SmallDisplayError> {
-        self.display.init().map_err(SmallDisplayError::Display)
+    pub fn init(&mut self) {
+        let _ = self.display.init();//?;//.map_err(|e| SmallDisplayError::Display(e))
     }
-    pub fn flush(&mut self) -> Result<(), SmallDisplayError> {
-        self.display.flush().map_err(SmallDisplayError::Display)
+    pub fn flush(&mut self) {
+        let _ = self.display.flush();//.map_err(SmallDisplayError::Display)
     }
 
     pub fn write_text(&mut self, text: &str, position: Point, baseline: Baseline) -> Result<Point, SmallDisplayError> {
@@ -109,8 +110,8 @@ pub fn init_display(
     Ok(disp)
 }
 
-type DefaultTextStyle<'a> = MonoTextStyle<'a, BinaryColor>;
-type MsgBoxText<'a> = Text<'a, DefaultTextStyle<'a>>;
+// type DefaultTextStyle<'a> = MonoTextStyle<'a, BinaryColor>;
+// type MsgBoxText<'a> = Text<'a, DefaultTextStyle<'a>>;
 
 static DEFAULT_TEXT_STYLE: Lazy<Mutex<MonoTextStyle<'static, BinaryColor>>> = Lazy::new(|| {
     Mutex::new(MonoTextStyleBuilder::new()
@@ -268,23 +269,18 @@ impl<'txt, C: PixelColor> StatusWindow<'txt, C> {
 }
 
 
-pub async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: InfoReceiver) -> Result<(), SmallDisplayError> {
+pub async fn display_runner(interface: I2CInterface<I2cDriver<'_>>, rx: InfoReceiver) -> Result<(), SmallDisplayError> {
     info!("started display_runner!!!!!!!");
     // let character_style: MonoTextStyle<'_, BinaryColor> = *DEFAULT_TEXT_STYLE.lock();
     let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
         .into_buffered_graphics_mode();
-    display.init()?;
+    let _ = display.init();
 
 
     let display_bounds = display.bounding_box();
 
     display.clear_buffer();
-    display.flush()?;
-
-    // let mut status_info = StatusInfo::default();
-    // status_info.win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
-    // status_info.win.draw(&mut display)?;
-    // display.flush()?;
+    let _ = display.flush();
 
     // let mut status_info = StatusInfo::default();
     // status_info.win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
@@ -293,7 +289,7 @@ pub async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: Info
     loop {
         let mut status_info = StatusInfo::default();
         status_info.win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
-        status_info.win.draw(&mut display)?;
+        let _draw = status_info.win.draw(&mut display);
             // let mut status_info = status_info.clone();
         let info_update = match rx.recv() {
             Ok(x) => x,
@@ -319,6 +315,6 @@ pub async fn display_runner<'d>(interface: I2CInterface<I2cDriver<'d>>, rx: Info
             },
         }
         status_info.update(&info_update, &mut display)?;
-        display.flush()?;
+        let _ = display.flush();
     }
 }

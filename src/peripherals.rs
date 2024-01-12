@@ -28,7 +28,7 @@ pub fn patch_eventfd() {
     info!("Setting up eventfd...");
     let config = esp_vfs_eventfd_config_t {
         max_fds: 1,
-        ..Default::default()
+        // ..Default::default()
     };
     esp_nofail! { unsafe { esp_vfs_eventfd_register(&config) } }
 }
