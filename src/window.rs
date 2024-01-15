@@ -95,7 +95,7 @@ impl<'label, C: PixelColor> LabeledText<'label, C> {
             label: self.label,
             text: SimpleText {
                 text,
-                ..self.text.clone()
+                ..self.text
             },
         }
     }

@@ -57,7 +57,7 @@ type SmDisplay<'a> = Ssd1306<
 >;
 
 
-pub fn bld_interface(i2c: I2cDriver<'_>) -> Result<Sdi<'_>, SmallDisplayError> {
+pub fn bld_interface(i2c: I2cDriver<'static>) -> Result<Sdi<'static>, SmallDisplayError> {
     Ok(I2CDisplayInterface::new(i2c))
 }
 
@@ -121,12 +121,12 @@ pub fn init_display(
 
 
 
-pub async fn display_runner(interface: I2CInterface<I2cDriver<'_>>, rx: InfoReceiver) -> Result<(), SmallDisplayError> {
+pub async fn display_runner(mut display: Ssd1306<I2CInterface<esp_idf_hal::i2c::I2cDriver<'static>>, DisplaySize128x64, BufferedGraphicsMode<DisplaySize128x64>>, rx: InfoReceiver) -> Result<(), SmallDisplayError> {
     info!("started display_runner!!!!!!!");
     let character_style = *DEFAULT_TEXT_STYLE.lock();
-    let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
-        .into_buffered_graphics_mode();
-    let _ = display.init();
+    // let mut display = init_display(interface, DisplaySize128x64, DisplayRotation::Rotate0).unwrap()
+    //     .into_buffered_graphics_mode();
+    // let _ = display.init();
 
 
     let display_bounds = display.bounding_box();
@@ -136,9 +136,19 @@ pub async fn display_runner(interface: I2CInterface<I2cDriver<'_>>, rx: InfoRece
 
     let mut status_info = StatusInfo::default();
     loop {
+        let x = rx.recv_async().await;
             // let mut status_info = status_info.clone();
-        let info_update = match rx.recv() {
-            Ok(x) => x,
+        match x {
+            Ok(info_update) => {
+                status_info.update(&info_update);
+                let mut win = StatusWindow::from(character_style, &status_info);
+                win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
+                if let Err(e) = win.draw(&mut display) {
+                    error!("oops!: {:?}", e);
+                }
+                let _ = &display.flush();
+                info!("flush");
+            },
             Err(e) => {
                 error!("error: {:?}", e);
                 return Err(SmallDisplayError::Other(format!("{}", e)));
@@ -160,13 +170,5 @@ pub async fn display_runner(interface: I2CInterface<I2cDriver<'_>>, rx: InfoRece
         //         info!("disp: {}", text);
         //     },
         // }
-        status_info.update(&info_update);
-        let mut win = StatusWindow::from(character_style, &status_info);
-        win.align_to_mut(&display_bounds, horizontal::Left, vertical::Top);
-        if let Err(e) = win.draw(&mut display) {
-            error!("oops!: {:?}", e);
-        }
-        let _ = display.flush();
-        info!("flush")
     }
 }

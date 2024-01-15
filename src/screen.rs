@@ -185,9 +185,6 @@ impl<'txt, C: PixelColor> StatusWindow<'txt, C> {
     }
 
     pub fn from(style: MonoTextStyle<'static, C>, status_info: &'txt StatusInfo) -> Self {
-        // let motion = &status_info.motion_state;
-        // let ip_string = &status_info.ip_string;
-        // let pin_state = status_info.button_state;
         Self::new(style,
             &status_info.ip_string,
             &status_info.button_state,

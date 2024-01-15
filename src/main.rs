@@ -18,6 +18,8 @@ use esp_idf_svc::{
     http::server::EspHttpServer,
 };
 use log::*;
+use ssd1306::mode::BufferedGraphicsMode;
+use ssd1306::{prelude::*, Ssd1306, I2CDisplayInterface};
 
 // mod app;
 // mod ble;
@@ -125,10 +127,10 @@ where
     P: InputPin,
 {
     warn!("pir_task");
-    tx.send(InfoUpdate::Motion(pir.get_level().into()))?;
+    tx.send_async(InfoUpdate::Motion(pir.get_level().into())).await?;
     loop {
         pir.wait_for_any_edge().await?;
-        tx.send(InfoUpdate::Motion(pir.get_level().into()))?;
+        tx.send_async(InfoUpdate::Motion(pir.get_level().into())).await?;
     }
 }
 
@@ -136,10 +138,10 @@ async fn button_task<P>(mut button: PinDriver<'_, P, Input>, tx: InfoSender) -> 
 where
     P: InputPin,
 {
-    tx.send(InfoUpdate::Button(button.get_level().into()))?;
+    tx.send_async(InfoUpdate::Button(button.get_level().into())).await?;
     loop {
-        button.wait_for_any_edge().await?;
-        tx.send(InfoUpdate::Button(button.get_level().into()))?;
+        button.wait_for_low().await?;
+        tx.send_async(InfoUpdate::Button(button.get_level().into())).await?;
         // std::thread::sleep(Duration::from_secs(1));
     }
 }
@@ -159,9 +161,8 @@ fn main() -> AnyResult<()> {
     let wakeup_reason = WakeupReason::get();
     info!("Last wakeup was due to {:#?}", wakeup_reason);
 
-    let i2c = take_i2c();
-    let sd_iface = bld_interface(i2c)?;
-    // let sd = SmallDisplay::new(sd_iface, DisplaySize128x64, DisplayRotation::Rotate0);
+    let i2c: esp_idf_hal::i2c::I2cDriver<'static> = take_i2c();
+    let sd_iface: I2CInterface<esp_idf_hal::i2c::I2cDriver<'static>> = bld_interface(i2c)?;
 
     let (tx, rx) = flume::unbounded::<InfoUpdate>();
 
@@ -233,6 +234,11 @@ fn main() -> AnyResult<()> {
         }
         Ok(h) => h,
     };
+    let disp: Ssd1306<I2CInterface<esp_idf_hal::i2c::I2cDriver<'static>>, DisplaySize128x64, ssd1306::mode::BasicMode> = Ssd1306::new(sd_iface, DisplaySize128x64, DisplayRotation::Rotate0);
+    let mut display: Ssd1306<I2CInterface<esp_idf_hal::i2c::I2cDriver<'static>>, DisplaySize128x64, BufferedGraphicsMode<DisplaySize128x64>> = disp.into_buffered_graphics_mode();
+    let _ = display.init();
+    display.clear_buffer();
+    let _ = display.flush();
 
     let ex: Executor<'_, 64> = edge_executor::Executor::default();
     edge_executor::block_on( async move {
@@ -240,8 +246,8 @@ fn main() -> AnyResult<()> {
         let _ = futures::executor::block_on(initial_wifi_connect(&mut mywifi, tx.clone()));
         let _button_task = ex.spawn(button_task(push_button, tx.clone()));
         let _pir_task = ex.spawn(pir_task(pir, tx.clone()));
-        let _disp_task = ex.spawn(display_runner(sd_iface, rx));
         let _wifi_loop = ex.spawn( app_wifi_loop(mywifi, tx.clone()) );
+        let _disp_task = ex.spawn(display_runner(display, rx));
         while ex.try_tick() {
             std::thread::sleep(Duration::from_micros(250));
         }
