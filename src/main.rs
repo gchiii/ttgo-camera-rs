@@ -7,6 +7,9 @@ use std::{
     time::{Instant, Duration},
     sync::{Arc, Mutex},
 };
+
+
+
 use esp_idf_hal::{reset::{ResetReason, WakeupReason}, gpio::{PinDriver, self, InputPin, Input}};
 use esp_idf_svc::{
     hal::peripheral::Peripheral,
@@ -29,6 +32,9 @@ mod preludes;
 mod wifi;
 mod small_display;
 mod window;
+mod screen;
+
+use crate::preludes::*;
 
 use crate::{wifi::{app_wifi_loop, initial_wifi_connect}, peripherals::{take_i2c, SYS_LOOP, PERIPHERALS, ESP_TASK_TIMER_SVR, create_esp_wifi}};
 use crate::small_display::*;
@@ -230,6 +236,7 @@ fn main() -> AnyResult<()> {
 
     let ex: Executor<'_, 64> = edge_executor::Executor::default();
     edge_executor::block_on( async move {
+
         let _ = futures::executor::block_on(initial_wifi_connect(&mut mywifi, tx.clone()));
         let _button_task = ex.spawn(button_task(push_button, tx.clone()));
         let _pir_task = ex.spawn(pir_task(pir, tx.clone()));

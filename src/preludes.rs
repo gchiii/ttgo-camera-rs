@@ -9,7 +9,8 @@ pub use log::*;
 // pub use prost::Message;
 pub use std::time::Duration;
 
-pub use crate::small_display::InfoUpdate;
+
+pub use crate::screen::InfoUpdate;
 pub use flume;
 
 pub type InfoSender = flume::Sender<InfoUpdate>;

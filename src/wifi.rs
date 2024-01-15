@@ -2,10 +2,10 @@ use anyhow::Result;
 use anyhow::anyhow;
 use embedded_svc::wifi::AccessPointInfo;
 use esp_idf_svc::wifi::{ClientConfiguration, Configuration};
-use crate::{ntp::ntp_sync, small_display::InfoUpdate};
+use crate::preludes::*;
+use crate::ntp::ntp_sync;
 
 use log::{info, warn};
-use crate::preludes::*;
 use esp_idf_svc::wifi::{AsyncWifi, EspWifi};
 use esp_idf_sys::esp_wifi_clear_ap_list;
 use std::thread;
