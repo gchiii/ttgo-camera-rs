@@ -11,7 +11,11 @@ pub use std::time::Duration;
 
 
 pub use crate::screen::InfoUpdate;
-pub use flume;
 
-pub type InfoSender = flume::Sender<InfoUpdate>;
-pub type InfoReceiver = flume::Receiver<InfoUpdate>;
+pub use crossbeam_channel;
+pub type InfoSender = crossbeam_channel::Sender<InfoUpdate>;
+pub type InfoReceiver = crossbeam_channel::Receiver<InfoUpdate>;
+
+// pub use flume;
+// pub type InfoSender = flume::Sender<InfoUpdate>;
+// pub type InfoReceiver = flume::Receiver<InfoUpdate>;

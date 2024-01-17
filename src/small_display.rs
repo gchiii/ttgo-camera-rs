@@ -136,7 +136,7 @@ pub async fn display_runner(mut display: Ssd1306<I2CInterface<esp_idf_hal::i2c::
 
     let mut status_info = StatusInfo::default();
     loop {
-        let x = rx.recv_async().await;
+        let x = rx.recv();
             // let mut status_info = status_info.clone();
         match x {
             Ok(info_update) => {
