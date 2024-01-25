@@ -5,6 +5,7 @@ use esp_idf_hal::peripheral::Peripheral;
 use esp_idf_hal::peripherals::Peripherals;
 // use esp_idf_hal::timer::{TimerConfig, TimerDriver};
 
+use esp_idf_hal::timer::{TimerDriver, TimerConfig};
 use esp_idf_hal::units::*;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
@@ -41,7 +42,6 @@ pub fn create_esp_wifi() -> EspWifi<'static> {
     EspWifi::new(modem, SYS_LOOP.clone(), Some(NVS_DEFAULT_PARTITION.clone())).unwrap()
 }
 
-#[cfg(feature = "unused")]
 pub fn create_timer_driver_00() -> TimerDriver<'static> {
     let p = PERIPHERALS.clone();
     let mut p = p.lock();
