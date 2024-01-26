@@ -41,7 +41,7 @@ mod small_display;
 mod window;
 mod screen;
 
-use crate::{preludes::*, event::EventLoopMessage};
+use crate::preludes::*;
 
 use crate::{wifi::{app_wifi_loop, initial_wifi_connect}, peripherals::{take_i2c, SYS_LOOP, PERIPHERALS, ESP_TASK_TIMER_SVR, create_esp_wifi}};
 use crate::small_display::*;
@@ -71,58 +71,58 @@ pub struct Config {
 // BUTTON input GPIO 0
 
 
-mod event {
-    use esp_idf_svc::eventloop::{
-        EspEventFetchData, EspEventPostData, EspTypedEventDeserializer, EspTypedEventSerializer,
-        EspTypedEventSource,
-    };
-    // use esp_idf_sys::libc;
+// mod event {
+//     use esp_idf_svc::eventloop::{
+//         EspEventFetchData, EspEventPostData, EspTypedEventDeserializer, EspTypedEventSerializer,
+//         EspTypedEventSource,
+//     };
+//     // use esp_idf_sys::libc;
 
-    #[derive(Copy, Clone, Debug)]
-    pub struct EventLoopMessage(u8);
+//     #[derive(Copy, Clone, Debug)]
+//     pub struct EventLoopMessage(u8);
 
-    impl EventLoopMessage {
-        pub fn new(data: u8) -> Self {
-            Self(data)
-        }
-    }
+//     impl EventLoopMessage {
+//         pub fn new(data: u8) -> Self {
+//             Self(data)
+//         }
+//     }
 
-    impl EspTypedEventSource for EventLoopMessage {
-        fn source() -> *const std::ffi::c_char {
-            b"DEMO-SERVICE\0".as_ptr() as *const _
-        }
-    }
+//     impl EspTypedEventSource for EventLoopMessage {
+//         fn source() -> *const std::ffi::c_char {
+//             b"DEMO-SERVICE\0".as_ptr() as *const _
+//         }
+//     }
 
-    impl EspTypedEventSerializer<EventLoopMessage> for EventLoopMessage {
-        fn serialize<R>(
-            event: &EventLoopMessage,
-            f: impl for<'a> FnOnce(&'a EspEventPostData) -> R,
-        ) -> R {
-            f(&unsafe { EspEventPostData::new(Self::source(), Self::event_id(), event) })
-        }
-    }
+//     impl EspTypedEventSerializer<EventLoopMessage> for EventLoopMessage {
+//         fn serialize<R>(
+//             event: &EventLoopMessage,
+//             f: impl for<'a> FnOnce(&'a EspEventPostData) -> R,
+//         ) -> R {
+//             f(&unsafe { EspEventPostData::new(Self::source(), Self::event_id(), event) })
+//         }
+//     }
 
-    impl EspTypedEventDeserializer<EventLoopMessage> for EventLoopMessage {
-        fn deserialize<R>(
-            data: &EspEventFetchData,
-            f: &mut impl for<'a> FnMut(&'a EventLoopMessage) -> R,
-        ) -> R {
-            f(unsafe { data.as_payload() })
-        }
-    }
-}
+//     impl EspTypedEventDeserializer<EventLoopMessage> for EventLoopMessage {
+//         fn deserialize<R>(
+//             data: &EspEventFetchData,
+//             f: &mut impl for<'a> FnMut(&'a EventLoopMessage) -> R,
+//         ) -> R {
+//             f(unsafe { data.as_payload() })
+//         }
+//     }
+// }
 
-fn init_eventloop() -> Result<(EspBackgroundEventLoop, EspBackgroundSubscription<'static>), EspError> {
-    info!("About to start a background event loop");
-    let eventloop = EspBackgroundEventLoop::new(&Default::default())?;
+// fn init_eventloop() -> Result<(EspBackgroundEventLoop, EspBackgroundSubscription<'static>), EspError> {
+//     info!("About to start a background event loop");
+//     let eventloop = EspBackgroundEventLoop::new(&Default::default())?;
 
-    info!("About to subscribe to the background event loop");
-    let subscription = eventloop.subscribe(|message: &EventLoopMessage| {
-        info!("Got event from the event loop: {:?}", message);
-    })?;
+//     info!("About to subscribe to the background event loop");
+//     let subscription = eventloop.subscribe(|message: &EventLoopMessage| {
+//         info!("Got event from the event loop: {:?}", message);
+//     })?;
 
-    Ok((eventloop, subscription))
-}
+//     Ok((eventloop, subscription))
+// }
 
 
 fn init_http(cam: Arc<Mutex<Camera<'static>>>, tx: InfoSender) -> AnyResult<EspHttpServer> {
@@ -147,7 +147,7 @@ fn init_http(cam: Arc<Mutex<Camera<'static>>>, tx: InfoSender) -> AnyResult<EspH
                 None => {
                     let mut response = request.into_status_response(500)?;
                     let _ = writeln!(response, "Error: Unable to get framebuffer");
-                    return Ok(());
+                    return anyhow::Ok(());
                 }
             };
             info!("got the framebuffer");
